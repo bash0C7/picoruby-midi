@@ -12,6 +12,7 @@ typedef struct {
     volatile midi_tmask_t src;   /* single transport bit; 0 = slot unused */
     volatile midi_tmask_t dst;   /* transport mask */
     volatile uint32_t sel;   /* MIDI_ROUTE_SEL_* */
+    volatile uint16_t sounding;  /* Channels a note on went through (see release) */
 } midi_route_t;
 
 typedef struct {
@@ -79,6 +80,7 @@ int MIDI_route_add_selection(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint32
         if (g_routes[i].src == 0) {
             g_routes[i].dst = dst_mask;
             g_routes[i].sel = sel;
+            g_routes[i].sounding = 0;
             g_routes[i].src = src_bit;        /* last: publishes the slot */
             return 0;
         }
@@ -86,12 +88,38 @@ int MIDI_route_add_selection(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint32
     return -1;
 }
 
+/* A route to `dst` went away: on every channel a note on went through it,
+ * Sustain off and All Notes Off, so nothing it started keeps sounding (a note
+ * off coming later has no route to go by). To the virtual port that is input
+ * for Ruby, queued as the route would have delivered it. */
+static void release(midi_tmask_t src, midi_tmask_t dst, uint16_t channels)
+{
+    if (dst == 0 || channels == 0) return;
+    midi_tmask_t virt = g_virtual;
+    midi_tmask_t out = dst & (midi_tmask_t)~virt;
+    bool to_ruby = virt && (dst & virt) && g_filter_sink && (g_virtual_listen & (1u << 0xB));
+    static const uint8_t CCS[2] = { 64, 123 };   /* Sustain, All Notes Off */
+    for (int ch = 0; ch < 16; ch++) {
+        if (!(channels & (1u << ch))) continue;
+        for (int k = 0; k < 2; k++) {
+            uint8_t status = (uint8_t)(0xB0 | ch);
+            if (out) MIDI_transport_send(out, 0, 0xB, status, CCS[k], 0);
+            if (to_ruby) {
+                midi_filter_event_t ev = { MIDI_ROUTE_DST_VIRTUAL, src, 0xB, status, CCS[k], 0 };
+                if (!g_filter_sink(&ev)) g_filter_overflows++;
+            }
+        }
+    }
+}
+
 int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask)
 {
     int dropped = 0;
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
         if (g_routes[i].src != src_bit) continue;
+        midi_tmask_t gone = g_routes[i].dst & dst_mask;
         midi_tmask_t left = g_routes[i].dst & (midi_tmask_t)~dst_mask;
+        uint16_t sounding = g_routes[i].sounding;
         if (left == 0) {
             g_routes[i].src = 0;              /* first: unpublishes the slot */
             g_routes[i].dst = 0;
@@ -99,6 +127,7 @@ int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask)
         } else {
             g_routes[i].dst = left;
         }
+        release(src_bit, gone, sounding);
     }
     return dropped;
 }
@@ -106,8 +135,12 @@ int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask)
 void MIDI_route_clear(void)
 {
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
+        midi_tmask_t src = g_routes[i].src;
+        midi_tmask_t dst = g_routes[i].dst;
+        uint16_t sounding = g_routes[i].sounding;
         g_routes[i].src = 0;
         g_routes[i].dst = 0;
+        if (src) release(src, dst, sounding);
     }
     for (int i = 0; i < MIDI_FILTER_MAX; i++) {
         g_filters[i].src = 0;
@@ -205,6 +238,10 @@ midi_tmask_t MIDI_route_targets(midi_tmask_t src_bit, uint8_t cin, uint8_t b1)
         if ((sel & MIDI_ROUTE_SEL_ALL) || (ch >= 0 && (sel & (1u << ch))) ||
             (clock && (sel & MIDI_ROUTE_SEL_CLOCK))) {
             dst |= g_routes[i].dst;
+            /* Remembered for release(): what removing the route has to stop */
+            if ((cin & 0x0F) == 0x9 && !(g_routes[i].sounding & (1u << ch))) {
+                g_routes[i].sounding |= (uint16_t)(1u << ch);
+            }
         }
     }
     return dst;

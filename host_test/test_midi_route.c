@@ -134,6 +134,8 @@ int main(void)
 
     printf("route: remove\n");
     EXPECT_EQ(MIDI_route_remove(0x01, 0x08), 1);      /* ch0 route had only 0x08 */
+    EXPECT_EQ(g_hits[3], 2);                          /* ch 3's note: CC 64 + CC 123 to it */
+    reset_hits();
     MIDI_route_packet(0x01, 0xB, 0xB0, 74, 64);
     EXPECT_EQ(g_hits[3], 0); EXPECT_EQ(g_hits[2], 1);
     EXPECT_EQ(MIDI_route_remove(0x01, MIDI_TMASK_ALL), 1);
@@ -164,7 +166,8 @@ int main(void)
     EXPECT_EQ(MIDI_route_targets(0x01, 0x9, 0x99), 0);
     MIDI_route_set_source(0x10, false);
     EXPECT_EQ(MIDI_route_sources(), MIDI_ROUTE_INPUT_SOURCES);
-    MIDI_route_clear();
+    MIDI_route_clear();                               /* releases the notes targeted above */
+    reset_hits();
 
     printf("filter: arguments\n");
     EXPECT_EQ(MIDI_route_set_filter(0x03, 0x08, 0x0300, -1, 0), -1);  /* source not one bit */
@@ -371,6 +374,49 @@ int main(void)
         MIDI_route_set_virtual(0);
         MIDI_route_set_filter_sink(NULL);
         MIDI_transport_unregister(0x20);
+    }
+
+    printf("release on removal\n");
+    {
+        reset_hits();
+        EXPECT_EQ(MIDI_route_add(0x01, 0x08 | 0x02, MIDI_ROUTE_ALL_CHANNELS), 0);
+        EXPECT_EQ(MIDI_route_add(0x04, 0x08, MIDI_ROUTE_CLOCK_ONLY), 0);
+        MIDI_route_packet(0x04, 0xF, 0xF8, 0, 0);                 /* a clock: no notes */
+        MIDI_route_packet(0x01, 0x9, 0x92, 60, 100);              /* ch 3 */
+        MIDI_route_packet(0x01, 0x9, 0x99, 36, 100);              /* ch 10 */
+        MIDI_route_packet(0x01, 0xB, 0xB0, 74, 1);                /* a CC on ch 1: not a note */
+        reset_hits();
+        EXPECT_EQ(MIDI_route_remove(0x01, 0x08), 0);              /* 0x02 is left on it */
+        EXPECT_EQ(g_hits[3], 4);                                  /* 2 channels x (CC 64, CC 123) */
+        EXPECT_EQ(g_last[3][0], 0xB); EXPECT_EQ(g_last[3][1], 0xB9);
+        EXPECT_EQ(g_last[3][2], 123); EXPECT_EQ(g_last[3][3], 0);
+        EXPECT_EQ(g_hits[1], 0);                                  /* still routed: untouched */
+        reset_hits();
+        EXPECT_EQ(MIDI_route_remove(0x04, MIDI_TMASK_ALL), 1);    /* the clock route */
+        EXPECT_EQ(g_hits[3], 0);
+        MIDI_route_clear();                                       /* releases what is left */
+        EXPECT_EQ(g_hits[1], 4);
+        reset_hits();
+        EXPECT_EQ(MIDI_route_add(0x01, 0x02, MIDI_ROUTE_ALL_CHANNELS), 0);   /* a fresh route */
+        EXPECT_EQ(MIDI_route_remove(0x01, 0x02), 1);
+        EXPECT_EQ(g_hits[1], 0);                                  /* passed nothing yet */
+        /* Into the virtual port: to its listeners, not out of it */
+        g_sunk_n = 0;
+        MIDI_route_set_filter_sink(fake_sink);
+        EXPECT_EQ(MIDI_transport_register_at(0x20, &g_t[5]), 0);
+        MIDI_route_set_virtual(0x20);
+        EXPECT_EQ(MIDI_route_add(0x01, 0x20, MIDI_ROUTE_ALL_CHANNELS), 0);
+        MIDI_route_packet(0x01, 0x9, 0x90, 60, 100);
+        MIDI_route_set_virtual_listen(1u << 0xB);
+        EXPECT_EQ(MIDI_route_remove(0x01, 0x20), 1);
+        EXPECT_EQ(g_hits[5], 0);
+        EXPECT_EQ(g_sunk_n, 2); EXPECT_EQ(g_sunk[1].dst, MIDI_ROUTE_DST_VIRTUAL);
+        EXPECT_EQ(g_sunk[1].b2, 123);
+        MIDI_route_clear();
+        MIDI_route_set_virtual(0);
+        MIDI_route_set_filter_sink(NULL);
+        MIDI_transport_unregister(0x20);
+        reset_hits(); g_sunk_n = 0;
     }
 
     printf("all route tests passed\n");

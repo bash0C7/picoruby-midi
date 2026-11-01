@@ -79,11 +79,18 @@ int MIDI_route_add_selection(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint32
 
 /* Remove the destinations in `dst_mask` from every route out of `src_bit`
  * (all of them for dst_mask MIDI_TMASK_ALL); routes left without a
- * destination are dropped. Returns how many routes were dropped. */
+ * destination are dropped. Returns how many routes were dropped.
+ *
+ * A removed destination gets Sustain off (CC 64 = 0) and All Notes Off
+ * (CC 123) on every channel a note on went through that route, so the notes
+ * it started do not hang (their note offs have no route left to go by).
+ * Routes that never passed a note on (a clock-only route) send nothing.
+ * Into the virtual port, the same reaches Ruby's listeners as input. */
 int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask);
 
 /* Drop every route and every filter, the script's watches (below) and the
- * virtual port's listen types. */
+ * virtual port's listen types. Each route's destinations are released as
+ * by MIDI_route_remove(). */
 void MIDI_route_clear(void);
 
 /* Whether any route, filter or watch is set (the input task keeps running
