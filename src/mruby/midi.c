@@ -226,6 +226,23 @@ mrb_midi_transport_connected(mrb_state *mrb, mrb_value self)
     return mrb_bool_value(t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx));
 }
 
+/* MIDI._route_virtual -> the virtual port's bit (0: none) */
+static mrb_value
+mrb_midi_route_virtual(mrb_state *mrb, mrb_value self)
+{
+    return mrb_fixnum_value(MIDI_route_virtual());
+}
+
+/* MIDI._route_virtual_listen(types): CINs routed into the virtual port that Ruby takes */
+static mrb_value
+mrb_midi_route_virtual_listen(mrb_state *mrb, mrb_value self)
+{
+    mrb_int types;
+    mrb_get_args(mrb, "i", &types);
+    MIDI_route_set_virtual_listen((uint16_t)types);
+    return mrb_nil_value();
+}
+
 /* MIDI._route_watch(src_mask): the script's watches (read with nothing routed) */
 static mrb_value
 mrb_midi_route_watch(mrb_state *mrb, mrb_value self)
@@ -667,6 +684,10 @@ mrb_picoruby_midi_gem_init(mrb_state *mrb)
                                   mrb_midi_transport_send, MRB_ARGS_REQ(5));
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_watch),
                                   mrb_midi_route_watch, MRB_ARGS_REQ(1));
+    mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_virtual),
+                                  mrb_midi_route_virtual, MRB_ARGS_NONE());
+    mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_virtual_listen),
+                                  mrb_midi_route_virtual_listen, MRB_ARGS_REQ(1));
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_get),
                                   mrb_midi_route_get, MRB_ARGS_REQ(1));
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_filtered),

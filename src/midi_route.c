@@ -28,6 +28,8 @@ static volatile midi_tmask_t g_extra_sources;
 static midi_filter_sink_t g_filter_sink;
 static volatile uint32_t g_filter_overflows;
 static volatile midi_tmask_t g_watch[2];   /* MIDI_WATCH_APP / MIDI_WATCH_SCRIPT */
+static volatile midi_tmask_t g_virtual;          /* The virtual port's bit, 0: none */
+static volatile uint16_t g_virtual_listen;       /* CINs queued for its input */
 
 static bool single_bit(midi_tmask_t b)
 {
@@ -111,6 +113,7 @@ void MIDI_route_clear(void)
         g_filters[i].src = 0;
     }
     g_watch[MIDI_WATCH_SCRIPT] = 0;
+    g_virtual_listen = 0;   /* Its listeners were the script's */
 }
 
 void MIDI_route_set_watch(int owner, midi_tmask_t src_mask)
@@ -302,6 +305,21 @@ uint32_t MIDI_route_filter_overflows(void)
     return g_filter_overflows;
 }
 
+void MIDI_route_set_virtual(midi_tmask_t bit)
+{
+    g_virtual = single_bit(bit) ? bit : 0;
+}
+
+midi_tmask_t MIDI_route_virtual(void)
+{
+    return g_virtual;
+}
+
+void MIDI_route_set_virtual_listen(uint16_t types)
+{
+    g_virtual_listen = types;
+}
+
 void MIDI_route_dispatch(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint8_t cin,
                          uint8_t b1, uint8_t b2, uint8_t b3)
 {
@@ -325,8 +343,17 @@ void MIDI_route_dispatch(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint8_t ci
     }
 
     midi_tmask_t direct = dst_mask & (midi_tmask_t)~divert;
-    if (divert) {
-        midi_filter_event_t ev = { divert, src_bit, cin, b1, b2, b3 };
+    /* Into the virtual port is input for Ruby, never a send to its transport
+     * (that would be output from it) */
+    midi_tmask_t virt = g_virtual;
+    uint32_t queued = divert;
+    if (virt && (direct & virt)) {
+        direct &= (midi_tmask_t)~virt;
+        if (g_filter_sink && (g_virtual_listen & (1u << cin))) queued |= MIDI_ROUTE_DST_VIRTUAL;
+    }
+    bypass &= (midi_tmask_t)~virt;
+    if (queued) {
+        midi_filter_event_t ev = { queued, src_bit, cin, b1, b2, b3 };
         if (!g_filter_sink(&ev)) {
             g_filter_overflows++;
             direct |= bypass;

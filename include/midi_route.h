@@ -82,7 +82,8 @@ int MIDI_route_add_selection(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint32
  * destination are dropped. Returns how many routes were dropped. */
 int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask);
 
-/* Drop every route and every filter, and the script's watches (below). */
+/* Drop every route and every filter, the script's watches (below) and the
+ * virtual port's listen types. */
 void MIDI_route_clear(void);
 
 /* Whether any route, filter or watch is set (the input task keeps running
@@ -163,7 +164,7 @@ bool MIDI_route_get_selection(int i, midi_tmask_t *src_bit, midi_tmask_t *dst_ma
 #define MIDI_FILTER_OVERFLOW_DROP   1   /* dropped */
 
 /* One diverted packet: from `src`, for the destinations in `dst` (transport
- * bits and/or MIDI_ROUTE_DST_RUBY). */
+ * bits, MIDI_ROUTE_DST_RUBY and / or MIDI_ROUTE_DST_VIRTUAL). */
 typedef struct {
     uint32_t dst;
     midi_tmask_t src;
@@ -194,6 +195,26 @@ uint32_t MIDI_route_filtered(midi_tmask_t src_bit);
 
 /* Packets the queue had no room for, since start-up. */
 uint32_t MIDI_route_filter_overflows(void);
+
+/*
+ * The virtual port: one transport bit with a direction for each side.
+ *
+ * Sending TO it (MIDI_transport_send, its transport's send_packet) is output
+ * FROM it: the transport's send_packet should call MIDI_route_packet(bit, ...),
+ * so what a program writes to the port goes wherever the port is routed.
+ * A route INTO it (another device's output) is input for the program: the
+ * route table never sends it to the transport but queues it for Ruby
+ * (MIDI_ROUTE_DST_VIRTUAL in the event, MIDI.on(port) listens), and only the
+ * CINs in `types` (bit n = CIN n; 0: nothing is queued). A route from the
+ * port to itself cannot be made, so nothing loops through it.
+ *
+ * On Midori it is the "Script" device: the script's midi_out / midi_in.
+ */
+#define MIDI_ROUTE_DST_VIRTUAL    (1u << (MIDI_TRANSPORT_REGISTRY_SIZE + 1))
+
+void         MIDI_route_set_virtual(midi_tmask_t bit);   /* 0: none */
+midi_tmask_t MIDI_route_virtual(void);
+void         MIDI_route_set_virtual_listen(uint16_t types);
 
 /* For a source that sends on its own (e.g. UI::Keys): forward one packet to
  * `dst_mask` (normally MIDI_route_targets() of it) with the filters from

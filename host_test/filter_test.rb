@@ -252,5 +252,29 @@ dropped = map.apply(MIDI::Message.new(:note_on, 0, 50, 90)) { |x| nil }
 check "dropped on", nil, dropped
 check "its off sends nothing", [], map.apply(MIDI::Message.new(:note_off, 0, 50, 0))
 
+# --- The virtual port: listening is listening to what is routed into it ------------
+
+reset
+$stub[:virtual] = 0x20
+heard = []
+h = MIDI.on(0x20, :note_on) { |m| heard << [m.note, m.source] }
+check "virtual: listened in C by types, no filter", false, $stub[:filters].key?([0x20, MIDI::DST_RUBY])
+check "virtual: note on queued", 1 << 0x9, $stub[:vlisten] & (1 << 0x9)
+$stub[:queue] << [MIDI::DST_VIRTUAL, 0x01, 0x9, 0x90, 60, 100]
+MIDI.run_filters
+check "virtual: heard with its source", [[60, $__midi_source_info__[0x01] ? $__midi_source_info__[0x01][0] : :usb_host]], heard
+# A filter on the route into the port: its output goes to the listeners, not out
+MIDI.route(HOST, 0x20)
+MIDI.filter(HOST, 0x20, types: [:note_on]) { |m| m.note += 12; m }
+$stub[:sent] = []
+$stub[:queue] << [0x20, 0x01, 0x9, 0x90, 61, 100]
+MIDI.run_filters
+check "virtual: filtered into the listeners", [60, 73], heard.map { |x| x[0] }
+check "virtual: nothing sent to its transport", [], $stub[:sent]
+MIDI.unfilter(HOST, 0x20)
+MIDI.off(0x20, nil, h)
+check "virtual: listening off", 0, $stub[:vlisten]
+$stub[:virtual] = nil
+
 puts "#{$passed} passed, #{$failed} failed"
 exit(1) if $failed > 0

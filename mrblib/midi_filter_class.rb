@@ -594,7 +594,7 @@ module MIDI
     # Note off for every note this chain sent and has not turned off
     def release
       @sounding.each_key do |key|
-        MIDI._transport_send(@dst, 0x8, 0x80 | (key / 128), key % 128, 0)
+        MIDI._deliver(@dst, 0x8, 0x80 | (key / 128), key % 128, 0)
       end
       @sounding = {}
     end
@@ -617,7 +617,7 @@ module MIDI
       _run_from(i, list).each do |x|
         _track(x)
         p = x.raw
-        MIDI._transport_send(@dst, p[0], p[1], p[2], p[3])
+        MIDI._deliver(@dst, p[0], p[1], p[2], p[3], x.source, x.device)
       end
     end
 

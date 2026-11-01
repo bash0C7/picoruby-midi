@@ -10,7 +10,9 @@ end
 module MIDI
   class << self
     def _uptime_ms; 0; end
-    def _route_sources; 0x07; end
+    def _route_sources; 0x07 | ($stub[:virtual] || 0); end
+    def _route_virtual; $stub[:virtual] || 0; end
+    def _route_virtual_listen(types); $stub[:vlisten] = types; end
 
     def _route_add(src, dst, ch)
       $stub[:routes] << [src, dst, ch]

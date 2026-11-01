@@ -55,6 +55,7 @@ module MIDI
   class << self
     def _uptime_ms; $now_ms; end
     def _route_sources; 0x07 | CLOCK_BIT; end   # The port declares the clock a source
+    def _route_virtual; 0; end
 
     # Sleeping lets the clock tick: one tick per call
     def _idle_ms(ms)

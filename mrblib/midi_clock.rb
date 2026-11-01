@@ -105,6 +105,9 @@ module MIDI
         src = transport_id
         dst = MIDI.route_bit(device)
         return nil if src == 0 || dst == 0
+        # A route into the virtual port is its input, not its output: the
+        # loop sends the clock to it itself, which goes out along its routes
+        return nil if dst == MIDI._route_virtual
         return :present if (MIDI._route_targets_of(src) & dst) != 0
         return nil if MIDI._route_add(src, dst, MIDI::ROUTE_ALL_CHANNELS) != 0
         :added

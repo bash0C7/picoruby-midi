@@ -329,6 +329,50 @@ int main(void)
     MIDI_route_set_watch(MIDI_WATCH_APP, 0);
     EXPECT_EQ(MIDI_route_active(), 0);
 
+    printf("virtual port\n");
+    {
+        /* Registered, so a send to its transport would show in g_hits[5] */
+        EXPECT_EQ(MIDI_transport_register_at(0x20, &g_t[5]), 0);
+        reset_hits(); g_sunk_n = 0;
+        MIDI_route_set_filter_sink(fake_sink);
+        MIDI_route_set_virtual(0x20);
+        EXPECT_EQ(MIDI_route_virtual(), 0x20);
+        MIDI_route_set_source(0x20, true);
+        EXPECT_EQ(MIDI_route_add(0x20, 0x08, MIDI_ROUTE_ALL_CHANNELS), 0);   /* out: to 0x08 */
+        EXPECT_EQ(MIDI_route_add(0x01, 0x20 | 0x02, MIDI_ROUTE_ALL_CHANNELS), 0);  /* in: from 0x01 */
+        EXPECT_EQ(MIDI_route_add(0x20, 0x20, MIDI_ROUTE_ALL_CHANNELS), -1);  /* never to itself */
+        MIDI_route_packet(0x20, 0x9, 0x90, 60, 100);                         /* the program's output */
+        EXPECT_EQ(g_hits[3], 1); EXPECT_EQ(g_sunk_n, 0);
+        MIDI_route_packet(0x01, 0x9, 0x90, 61, 100);    /* into the port: not listened to */
+        EXPECT_EQ(g_hits[1], 1); EXPECT_EQ(g_hits[5], 0); EXPECT_EQ(g_sunk_n, 0);
+        EXPECT_EQ(g_hits[3], 1);                        /* not forwarded through the port */
+        MIDI_route_set_virtual_listen(0x0300);          /* note on / off */
+        MIDI_route_packet(0x01, 0x9, 0x90, 62, 100);
+        EXPECT_EQ(g_sunk_n, 1); EXPECT_EQ(g_sunk[0].dst, MIDI_ROUTE_DST_VIRTUAL);
+        EXPECT_EQ(g_sunk[0].src, 0x01); EXPECT_EQ(g_sunk[0].b2, 62);
+        EXPECT_EQ(g_hits[3], 1); EXPECT_EQ(g_hits[5], 0);
+        MIDI_route_packet(0x01, 0xB, 0xB0, 1, 2);       /* a CC: not a listened type */
+        EXPECT_EQ(g_sunk_n, 1);
+        /* A filter on the route into the port: one event for both */
+        EXPECT_EQ(MIDI_route_set_filter(0x01, 0x20, 0x0200, -1, 0), 0);
+        MIDI_route_packet(0x01, 0x9, 0x90, 63, 100);
+        EXPECT_EQ(g_sunk_n, 2); EXPECT_EQ(g_sunk[1].dst, 0x20);   /* diverted, not listened twice */
+        g_sunk_n = SINK_CAP;                            /* full: bypass never reaches the port */
+        MIDI_route_packet(0x01, 0x9, 0x90, 64, 100);
+        EXPECT_EQ(g_hits[5], 0);
+        MIDI_route_clear();
+        EXPECT_EQ(MIDI_route_virtual(), 0x20);          /* the port stays, its listening goes */
+        g_sunk_n = 0;
+        EXPECT_EQ(MIDI_route_add(0x01, 0x20, MIDI_ROUTE_ALL_CHANNELS), 0);
+        MIDI_route_packet(0x01, 0x9, 0x90, 65, 100);
+        EXPECT_EQ(g_sunk_n, 0);
+        MIDI_route_clear();
+        MIDI_route_set_source(0x20, false);
+        MIDI_route_set_virtual(0);
+        MIDI_route_set_filter_sink(NULL);
+        MIDI_transport_unregister(0x20);
+    }
+
     printf("all route tests passed\n");
     return 0;
 }

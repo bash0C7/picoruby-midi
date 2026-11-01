@@ -39,6 +39,9 @@ module MIDI
   # Destination of a listener (MIDI.on): Ruby itself, not a transport -- the
   # bit above the 16 transport bits (MIDI_ROUTE_DST_RUBY)
   DST_RUBY = 0x10000
+  # Input of the virtual port (MIDI_ROUTE_DST_VIRTUAL): what is routed into
+  # it, for MIDI.on(port) -- on Midori the Script device's midi_in
+  DST_VIRTUAL = 0x20000
   # Every transport (MIDI_TMASK_ALL)
   ALL_TRANSPORTS = 0xFFFF
   # _pair_key: a source's slot, room for every destination up to DST_RUBY
@@ -516,6 +519,12 @@ module MIDI
         drop = false if f[2] == 0
         i += 1
       end
+      # Listening on the virtual port is listening to what is routed into it:
+      # C queues those types, the channels are told apart here
+      if dst == DST_RUBY && src == _route_virtual
+        _route_virtual_listen(bits)
+        return true
+      end
       ch = (same_channel && !channel.nil?) ? channel : ROUTE_ALL_CHANNELS
       _filter_set(src, dst, bits, ch, drop ? 1 : 0) == 0
     end
@@ -525,7 +534,11 @@ module MIDI
       key = _pair_key(src, dst)
       if list.size == 0
         $__midi_filters__.delete(key)
-        _filter_clear(src, dst)
+        if dst == DST_RUBY && src == _route_virtual
+          _route_virtual_listen(0)
+        else
+          _filter_clear(src, dst)
+        end
       else
         $__midi_filters__[key] = list
         _filter_apply(src, dst, list)
@@ -553,11 +566,28 @@ module MIDI
             end
           elsif bit != DST_RUBY
             # Its filter went away after the packet was queued: send it as is
-            _transport_send(bit, ev[2], ev[3], ev[4], ev[5])
+            _deliver(bit, ev[2], ev[3], ev[4], ev[5], source, device)
           end
         end
         bit = bit << 1
       end
+      # Routed into the virtual port: its listeners (MIDI.on(port))
+      if (dst & DST_VIRTUAL) != 0
+        _deliver(_route_virtual, ev[2], ev[3], ev[4], ev[5], source, device)
+      end
+    end
+
+    # One packet to a route destination after the filters: a transport, or
+    # for the virtual port, its listeners (into the port is the program's
+    # input; a send to its transport would be output from it)
+    def _deliver(dst, cin, b1, b2, b3, source = nil, device = nil)
+      virt = _route_virtual
+      if virt == 0 || dst != virt
+        _transport_send(dst, cin, b1, b2, b3)
+        return
+      end
+      list = $__midi_filters__[_pair_key(virt, DST_RUBY)]
+      _filter_listen(list, Message._from_packet(cin, b1, b2, b3, source, device)) if list
     end
 
     def _filter_matches?(f, m)
@@ -602,7 +632,7 @@ module MIDI
       end
       msgs.each do |x|
         p = x.raw
-        _transport_send(dst, p[0], p[1], p[2], p[3])
+        _deliver(dst, p[0], p[1], p[2], p[3], x.source, x.device)
       end
     end
   end

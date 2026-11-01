@@ -655,6 +655,27 @@ c_midi_transport_connected(mrbc_vm *vm, mrbc_value v[], int argc)
 }
 
 /*
+ * MIDI._route_virtual -> the virtual port's bit (0: none)
+ */
+static void
+c_midi_route_virtual(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm; (void)argc;
+    SET_INT_RETURN(MIDI_route_virtual());
+}
+
+/*
+ * MIDI._route_virtual_listen(types): CINs routed into the virtual port that Ruby takes
+ */
+static void
+c_midi_route_virtual_listen(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    (void)vm;
+    if (argc >= 1) MIDI_route_set_virtual_listen((uint16_t)GET_INT_ARG(1));
+    SET_NIL_RETURN();
+}
+
+/*
  * MIDI._route_watch(src_mask): the script's watches (read with nothing routed)
  */
 static void
@@ -790,6 +811,8 @@ mrbc_midi_init(mrbc_vm *vm)
     mrbc_define_method(vm, module_MIDI, "_route_targets_of", c_midi_route_targets_of);
     mrbc_define_method(vm, module_MIDI, "_transport_send", c_midi_transport_send);
     mrbc_define_method(vm, module_MIDI, "_route_watch", c_midi_route_watch);
+    mrbc_define_method(vm, module_MIDI, "_route_virtual", c_midi_route_virtual);
+    mrbc_define_method(vm, module_MIDI, "_route_virtual_listen", c_midi_route_virtual_listen);
     mrbc_define_method(vm, module_MIDI, "_route_get", c_midi_route_get);
     mrbc_define_method(vm, module_MIDI, "_route_filtered", c_midi_route_filtered);
     mrbc_define_method(vm, module_MIDI, "_transport_connected?", c_midi_transport_connected);
