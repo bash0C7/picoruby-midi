@@ -218,7 +218,7 @@ check "types it does not take go through", [[0x08, 0xB, 0xB0, 74, 10]], sent
 MIDI.filter(HOST, AMY, types: :note_on) { |m| m.velocity = 1; m }
 note_on(0x01, 0x08, 60)
 check "block filters follow the chain", [[0x08, 0x9, 0x90, 72, 1], [0x08, 0x9, 0x90, 76, 1]], sent
-MIDI.unfilter(HOST, AMY, $__midi_filters__[0x01 * 0x1000 + 0x08].last[3])
+MIDI.unfilter(HOST, AMY, $__midi_filters__[MIDI._pair_key(0x01, 0x08)].last[3])
 
 # set_param
 chain_events.clear

@@ -108,7 +108,7 @@ module MIDI
     # @return [Integer] routes removed
     def unroute(from, to = nil)
       unfilter(from, to)
-      dst = to.nil? ? 0xFF : route_bit(to)
+      dst = to.nil? ? ALL_TRANSPORTS : route_bit(to)
       _route_remove(route_bit(from), dst)
     end
 

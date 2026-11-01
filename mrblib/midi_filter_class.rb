@@ -781,7 +781,7 @@ module MIDI
       raise ArgumentError, "MIDI.chain: destination is not a registered transport" if dst == 0
       raise ArgumentError, "MIDI.chain: source and destination are the same" if src == dst
       list = _chain_specs(specs)
-      key = src * 0x1000 + dst
+      key = _pair_key(src, dst)
       c = $__midi_chains__[key]
       if list.empty?
         _chain_drop(src, dst) if c
@@ -803,7 +803,7 @@ module MIDI
 
     # The instances on the route from `from` to `to` ([] for none)
     def chain_of(from, to)
-      c = $__midi_chains__[route_bit(from) * 0x1000 + route_bit(to)]
+      c = $__midi_chains__[_pair_key(route_bit(from), route_bit(to))]
       c ? c.filters : []
     end
 
@@ -840,7 +840,7 @@ module MIDI
     # Put the chain's entry at the head of its route's filter list, or take
     # it out when no filter is live (only unregistered names)
     def _chain_apply(c)
-      key = c.src * 0x1000 + c.dst
+      key = _pair_key(c.src, c.dst)
       list = ($__midi_filters__[key] || []).reject { |f| f[3].equal?(c.block) }
       ty = c.types
       unless ty.empty?

@@ -26,12 +26,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "midi_transport.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define MIDI_ROUTE_MAX          8
+#define MIDI_ROUTE_MAX          32
 #define MIDI_ROUTE_ALL_CHANNELS (-1)
 /* A route's "channel" that passes only what synchronises: timing clock,
  * start / continue / stop and song position pointer. */
@@ -68,18 +69,18 @@ int MIDI_route_channel(uint32_t sel);
  * Returns 0, or -1 when the arguments are invalid (src_bit not a single
  * bit, an empty destination, a destination equal to the source) or the
  * table is full. */
-int MIDI_route_add(uint8_t src_bit, uint8_t dst_mask, int channel);
+int MIDI_route_add(midi_tmask_t src_bit, midi_tmask_t dst_mask, int channel);
 
 /* MIDI_route_add with a selection (MIDI_ROUTE_SEL_*): one route passing
  * every channel / the clock in it. A route with the same source and
  * selection takes the destinations. Returns 0, or -1 as MIDI_route_add
  * (also for an empty selection, or ALL combined with anything). */
-int MIDI_route_add_selection(uint8_t src_bit, uint8_t dst_mask, uint32_t sel);
+int MIDI_route_add_selection(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint32_t sel);
 
 /* Remove the destinations in `dst_mask` from every route out of `src_bit`
- * (all of them for dst_mask 0xFF); routes left without a destination are
- * dropped. Returns how many routes were dropped. */
-int MIDI_route_remove(uint8_t src_bit, uint8_t dst_mask);
+ * (all of them for dst_mask MIDI_TMASK_ALL); routes left without a
+ * destination are dropped. Returns how many routes were dropped. */
+int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask);
 
 /* Drop every route and every filter, and the script's watches (below). */
 void MIDI_route_clear(void);
@@ -91,10 +92,10 @@ bool MIDI_route_active(void);
 /* The transports a packet from `src_bit` would be forwarded to (0 for
  * none). For a source that sends on its own and wants to fold the routes
  * into one MIDI_transport_send() with destinations of its own. */
-uint8_t MIDI_route_targets(uint8_t src_bit, uint8_t cin, uint8_t b1);
+midi_tmask_t MIDI_route_targets(midi_tmask_t src_bit, uint8_t cin, uint8_t b1);
 
 /* Whether any route, filter or watch starts from `src_bit`. */
-bool MIDI_route_from(uint8_t src_bit);
+bool MIDI_route_from(midi_tmask_t src_bit);
 
 /* Built-in route sources: the transports the input task reads (USB host
  * 0x01, UART 0x02, USB device 0x04). */
@@ -103,16 +104,16 @@ bool MIDI_route_from(uint8_t src_bit);
 /* Declare (on) or retract (off) `bit` as a route source besides the
  * built-in ones. Such a source forwards its own packets (see
  * MIDI_route_targets / MIDI_route_packet); the input task never reads it. */
-void MIDI_route_set_source(uint8_t bit, bool on);
+void MIDI_route_set_source(midi_tmask_t bit, bool on);
 
 /* Every transport a route may start from: MIDI_ROUTE_INPUT_SOURCES plus the
  * declared ones. */
-uint8_t MIDI_route_sources(void);
+midi_tmask_t MIDI_route_sources(void);
 
 /* Forward one packet received on `src_bit` along the matching routes.
  * cin is the USB-MIDI Code Index Number (low nibble used), b1..b3 the
  * message bytes. Filters apply (see below). */
-void MIDI_route_packet(uint8_t src_bit, uint8_t cin,
+void MIDI_route_packet(midi_tmask_t src_bit, uint8_t cin,
                        uint8_t b1, uint8_t b2, uint8_t b3);
 
 /*
@@ -126,13 +127,13 @@ void MIDI_route_packet(uint8_t src_bit, uint8_t cin,
 #define MIDI_WATCH_APP    0
 #define MIDI_WATCH_SCRIPT 1
 
-void    MIDI_route_set_watch(int owner, uint8_t src_mask);
-uint8_t MIDI_route_watched(void);
+void         MIDI_route_set_watch(int owner, midi_tmask_t src_mask);
+midi_tmask_t MIDI_route_watched(void);
 
 /* Read route `i` (0..MIDI_ROUTE_MAX-1). Returns false for an unused slot.
  * channel is MIDI_route_channel() of its selection. */
-bool MIDI_route_get(int i, uint8_t *src_bit, uint8_t *dst_mask, int *channel);
-bool MIDI_route_get_selection(int i, uint8_t *src_bit, uint8_t *dst_mask, uint32_t *sel);
+bool MIDI_route_get(int i, midi_tmask_t *src_bit, midi_tmask_t *dst_mask, int *channel);
+bool MIDI_route_get_selection(int i, midi_tmask_t *src_bit, midi_tmask_t *dst_mask, uint32_t *sel);
 
 /*
  * Filters (MIDI.filter / MIDI.on)
@@ -146,12 +147,15 @@ bool MIDI_route_get_selection(int i, uint8_t *src_bit, uint8_t *dst_mask, uint32
  *
  * MIDI_ROUTE_DST_RUBY is a destination of its own: a filter to it receives
  * packets from `src_bit` with no route needed (what MIDI.on listens with).
- * It never names a transport, so it costs no registry bit.
+ * It never names a transport, so it costs no registry bit: it is the bit
+ * just above them, which is why filter destinations are uint32_t.
  *
  * The queue itself is the port's (a FreeRTOS queue on ESP32): it hands a
  * sink to MIDI_route_set_filter_sink(). Without a sink nothing is diverted.
  */
-#define MIDI_ROUTE_DST_RUBY       0x100
+#define MIDI_ROUTE_DST_RUBY       (1u << MIDI_TRANSPORT_REGISTRY_SIZE)
+/* Every destination a filter can have */
+#define MIDI_ROUTE_DST_ALL        ((uint32_t)MIDI_TMASK_ALL | MIDI_ROUTE_DST_RUBY)
 #define MIDI_FILTER_MAX           16
 
 /* What happens to a packet the queue has no room for */
@@ -161,8 +165,8 @@ bool MIDI_route_get_selection(int i, uint8_t *src_bit, uint8_t *dst_mask, uint32
 /* One diverted packet: from `src`, for the destinations in `dst` (transport
  * bits and/or MIDI_ROUTE_DST_RUBY). */
 typedef struct {
-    uint16_t dst;
-    uint8_t src;
+    uint32_t dst;
+    midi_tmask_t src;
     uint8_t cin;
     uint8_t b1, b2, b3;
 } midi_filter_event_t;
@@ -178,15 +182,15 @@ void MIDI_route_set_filter_sink(midi_filter_sink_t sink);
  * channel is `channel` (or any, for MIDI_ROUTE_ALL_CHANNELS). Setting it
  * again for the same source and destination replaces it.
  * Returns 0, or -1 for invalid arguments or a full table. */
-int MIDI_route_set_filter(uint8_t src_bit, uint16_t dst_mask, uint16_t types,
+int MIDI_route_set_filter(midi_tmask_t src_bit, uint32_t dst_mask, uint16_t types,
                           int channel, uint8_t overflow);
 
 /* Remove the filters from `src_bit` to the destinations in `dst_mask`
- * (0xFFFF: all of them). Returns how many were removed. */
-int MIDI_route_clear_filter(uint8_t src_bit, uint16_t dst_mask);
+ * (MIDI_ROUTE_DST_ALL: all of them). Returns how many were removed. */
+int MIDI_route_clear_filter(midi_tmask_t src_bit, uint32_t dst_mask);
 
 /* Destinations that have a filter from `src_bit` (for the UI). */
-uint16_t MIDI_route_filtered(uint8_t src_bit);
+uint32_t MIDI_route_filtered(midi_tmask_t src_bit);
 
 /* Packets the queue had no room for, since start-up. */
 uint32_t MIDI_route_filter_overflows(void);
@@ -195,7 +199,7 @@ uint32_t MIDI_route_filter_overflows(void);
  * `dst_mask` (normally MIDI_route_targets() of it) with the filters from
  * `src_bit` applied -- diverted destinations and Ruby listeners get it
  * through the queue, the rest directly. */
-void MIDI_route_dispatch(uint8_t src_bit, uint8_t dst_mask, uint8_t cin,
+void MIDI_route_dispatch(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint8_t cin,
                          uint8_t b1, uint8_t b2, uint8_t b3);
 
 #ifdef __cplusplus

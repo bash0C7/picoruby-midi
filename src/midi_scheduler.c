@@ -17,7 +17,7 @@
 #include "../include/midi_scheduler.h"
 
 typedef struct {
-    uint8_t transport_mask;
+    midi_tmask_t transport_mask;
     uint8_t channel;
     uint8_t note;
     uint64_t off_time_us;
@@ -42,14 +42,14 @@ void midi_scheduler_set_send_callback(midi_scheduler_send_fn cb)
     g_send_cb = cb;
 }
 
-static void emit_note_off(uint8_t transport_mask, uint8_t channel, uint8_t note)
+static void emit_note_off(midi_tmask_t transport_mask, uint8_t channel, uint8_t note)
 {
     if (!g_send_cb) return;
     uint8_t status = 0x80 | (channel & 0x0F);
     g_send_cb(transport_mask, 0x08, status, note, 0);
 }
 
-static void emit_note_on(uint8_t transport_mask, uint8_t channel,
+static void emit_note_on(midi_tmask_t transport_mask, uint8_t channel,
                          uint8_t note, uint8_t velocity)
 {
     if (!g_send_cb) return;
@@ -69,7 +69,7 @@ void midi_scheduler_tick(uint64_t now_us)
     }
 }
 
-int midi_scheduler_trigger(uint8_t transport_mask,
+int midi_scheduler_trigger(midi_tmask_t transport_mask,
                            uint8_t channel, uint8_t note, uint8_t velocity,
                            uint32_t duration_ms, uint64_t now_us)
 {

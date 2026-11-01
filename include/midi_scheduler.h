@@ -24,7 +24,7 @@ extern "C" {
  * (0x09 = note_on, 0x08 = note_off). The status byte already has the
  * channel low-nibble baked in.
  */
-typedef void (*midi_scheduler_send_fn)(uint8_t transport_mask,
+typedef void (*midi_scheduler_send_fn)(midi_tmask_t transport_mask,
                                        uint8_t cin,
                                        uint8_t status,
                                        uint8_t data1,
@@ -52,7 +52,7 @@ void midi_scheduler_tick(uint64_t now_us);
  * Returns 0 on success. Returns -1 when all slots are full; the
  * note_on still went out, but no automatic note_off is scheduled.
  */
-int midi_scheduler_trigger(uint8_t transport_mask,
+int midi_scheduler_trigger(midi_tmask_t transport_mask,
                            uint8_t channel, uint8_t note, uint8_t velocity,
                            uint32_t duration_ms, uint64_t now_us);
 

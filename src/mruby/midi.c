@@ -134,7 +134,7 @@ mrb_midi_route_add(mrb_state *mrb, mrb_value self)
 {
     mrb_int src, dst, channel;
     mrb_get_args(mrb, "iii", &src, &dst, &channel);
-    return mrb_fixnum_value(MIDI_route_add((uint8_t)src, (uint8_t)dst, (int)channel));
+    return mrb_fixnum_value(MIDI_route_add((midi_tmask_t)src, (midi_tmask_t)dst, (int)channel));
 }
 
 /* MIDI._route_add_sel(src_bit, dst_mask, selection) -> 0 / -1 */
@@ -143,7 +143,7 @@ mrb_midi_route_add_sel(mrb_state *mrb, mrb_value self)
 {
     mrb_int src, dst, sel;
     mrb_get_args(mrb, "iii", &src, &dst, &sel);
-    return mrb_fixnum_value(MIDI_route_add_selection((uint8_t)src, (uint8_t)dst, (uint32_t)sel));
+    return mrb_fixnum_value(MIDI_route_add_selection((midi_tmask_t)src, (midi_tmask_t)dst, (uint32_t)sel));
 }
 
 /* MIDI._route_remove(src_bit, dst_mask) -> number of routes dropped */
@@ -152,7 +152,7 @@ mrb_midi_route_remove(mrb_state *mrb, mrb_value self)
 {
     mrb_int src, dst;
     mrb_get_args(mrb, "ii", &src, &dst);
-    return mrb_fixnum_value(MIDI_route_remove((uint8_t)src, (uint8_t)dst));
+    return mrb_fixnum_value(MIDI_route_remove((midi_tmask_t)src, (midi_tmask_t)dst));
 }
 
 /* MIDI._route_clear */
@@ -183,9 +183,9 @@ mrb_midi_route_targets_of(mrb_state *mrb, mrb_value self)
 {
     mrb_int src;
     mrb_get_args(mrb, "i", &src);
-    uint8_t s, d, all = 0;
+    midi_tmask_t s, d, all = 0;
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
-        if (MIDI_route_get(i, &s, &d, NULL) && s == (uint8_t)src) all |= d;
+        if (MIDI_route_get(i, &s, &d, NULL) && s == (midi_tmask_t)src) all |= d;
     }
     return mrb_fixnum_value(all);
 }
@@ -196,7 +196,7 @@ mrb_midi_route_get(mrb_state *mrb, mrb_value self)
 {
     mrb_int i;
     mrb_get_args(mrb, "i", &i);
-    uint8_t src, dst;
+    midi_tmask_t src, dst;
     uint32_t sel;
     if (!MIDI_route_get_selection((int)i, &src, &dst, &sel)) return mrb_nil_value();
     mrb_value a = mrb_ary_new_capa(mrb, 4);
@@ -207,13 +207,13 @@ mrb_midi_route_get(mrb_state *mrb, mrb_value self)
     return a;
 }
 
-/* MIDI._route_filtered(src_bit) -> destinations with a filter (0x100 = Ruby) */
+/* MIDI._route_filtered(src_bit) -> destinations with a filter (MIDI::DST_RUBY = Ruby) */
 static mrb_value
 mrb_midi_route_filtered(mrb_state *mrb, mrb_value self)
 {
     mrb_int src;
     mrb_get_args(mrb, "i", &src);
-    return mrb_fixnum_value(MIDI_route_filtered((uint8_t)src));
+    return mrb_fixnum_value((mrb_int)MIDI_route_filtered((midi_tmask_t)src));
 }
 
 /* MIDI._transport_connected?(bit) -> whether that registered transport is up */
@@ -222,7 +222,7 @@ mrb_midi_transport_connected(mrb_state *mrb, mrb_value self)
 {
     mrb_int bit;
     mrb_get_args(mrb, "i", &bit);
-    const midi_transport_t *t = MIDI_transport_get((uint8_t)bit);
+    const midi_transport_t *t = MIDI_transport_get((midi_tmask_t)bit);
     return mrb_bool_value(t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx));
 }
 
@@ -232,7 +232,7 @@ mrb_midi_route_watch(mrb_state *mrb, mrb_value self)
 {
     mrb_int mask;
     mrb_get_args(mrb, "i", &mask);
-    MIDI_route_set_watch(MIDI_WATCH_SCRIPT, (uint8_t)mask);
+    MIDI_route_set_watch(MIDI_WATCH_SCRIPT, (midi_tmask_t)mask);
     return mrb_nil_value();
 }
 
@@ -242,7 +242,7 @@ mrb_midi_transport_send(mrb_state *mrb, mrb_value self)
 {
     mrb_int mask, cin, b1, b2, b3;
     mrb_get_args(mrb, "iiiii", &mask, &cin, &b1, &b2, &b3);
-    MIDI_transport_send((uint8_t)mask, 0, (uint8_t)(cin & 0x0F),
+    MIDI_transport_send((midi_tmask_t)mask, 0, (uint8_t)(cin & 0x0F),
                         (uint8_t)b1, (uint8_t)b2, (uint8_t)b3);
     return mrb_nil_value();
 }
@@ -264,7 +264,7 @@ mrb_midi_filter_set(mrb_state *mrb, mrb_value self)
 {
     mrb_int src, dst, types, channel, overflow;
     mrb_get_args(mrb, "iiiii", &src, &dst, &types, &channel, &overflow);
-    return mrb_fixnum_value(MIDI_route_set_filter((uint8_t)src, (uint16_t)dst,
+    return mrb_fixnum_value(MIDI_route_set_filter((midi_tmask_t)src, (uint32_t)dst,
                                                   (uint16_t)types, (int)channel,
                                                   (uint8_t)overflow));
 }
@@ -275,20 +275,21 @@ mrb_midi_filter_clear(mrb_state *mrb, mrb_value self)
 {
     mrb_int src, dst;
     mrb_get_args(mrb, "ii", &src, &dst);
-    return mrb_fixnum_value(MIDI_route_clear_filter((uint8_t)src, (uint16_t)dst));
+    return mrb_fixnum_value(MIDI_route_clear_filter((midi_tmask_t)src, (uint32_t)dst));
 }
 
 /* MIDI._filter_pop -> [dst_mask, src_bit, cin, b1, b2, b3] or nil */
 static mrb_value
 mrb_midi_filter_pop(mrb_state *mrb, mrb_value self)
 {
-    uint16_t dst;
-    uint8_t src, cin, b1, b2, b3;
+    uint32_t dst;
+    midi_tmask_t src;
+    uint8_t cin, b1, b2, b3;
     if (!MIDI_Filter_pop(&dst, &src, &cin, &b1, &b2, &b3)) {
         return mrb_nil_value();
     }
     mrb_value a = mrb_ary_new_capa(mrb, 6);
-    mrb_ary_push(mrb, a, mrb_fixnum_value(dst));
+    mrb_ary_push(mrb, a, mrb_fixnum_value((mrb_int)dst));
     mrb_ary_push(mrb, a, mrb_fixnum_value(src));
     mrb_ary_push(mrb, a, mrb_fixnum_value(cin));
     mrb_ary_push(mrb, a, mrb_fixnum_value(b1));
@@ -327,7 +328,7 @@ mrb_midi_external_bpm_from(mrb_state *mrb, mrb_value self)
 {
     mrb_int src;
     mrb_get_args(mrb, "i", &src);
-    return mrb_float_value(mrb, (mrb_float)MIDI_Input_get_external_bpm_from((uint8_t)src));
+    return mrb_float_value(mrb, (mrb_float)MIDI_Input_get_external_bpm_from((midi_tmask_t)src));
 }
 
 /* MIDI._reset_external_clock_from(src_bit) */
@@ -336,7 +337,7 @@ mrb_midi_reset_external_clock_from(mrb_state *mrb, mrb_value self)
 {
     mrb_int src;
     mrb_get_args(mrb, "i", &src);
-    MIDI_Input_reset_external_clock_from((uint8_t)src);
+    MIDI_Input_reset_external_clock_from((midi_tmask_t)src);
     return mrb_nil_value();
 }
 
@@ -423,7 +424,7 @@ mrb_midi_trigger(mrb_state *mrb, mrb_value self)
     mrb_get_args(mrb, "iiiii",
                  &transport_mask, &channel, &note, &velocity, &duration_ms);
 
-    int ret = MIDI_Note_trigger((uint8_t)transport_mask,
+    int ret = MIDI_Note_trigger((midi_tmask_t)transport_mask,
                                 (uint8_t)channel,
                                 (uint8_t)note,
                                 (uint8_t)velocity,

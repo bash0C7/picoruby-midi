@@ -204,7 +204,7 @@ static void register_builtin_transports(void)
  * ======================================== */
 
 static esp_timer_handle_t g_clock_timer = NULL;
-static uint8_t g_clock_bit;
+static midi_tmask_t g_clock_bit;
 static float g_clock_follow_bpm;              /* 0: not following */
 static uint64_t g_clock_period_us;            /* Period the timer runs at */
 static volatile uint32_t g_clock_next_period_us; /* Period from the next tick on (0: none) */
@@ -251,9 +251,9 @@ static void register_clock_transport(void)
 
 static void clock_send(uint8_t status)
 {
-    uint8_t bit = g_clock_bit;
+    midi_tmask_t bit = g_clock_bit;
     if (!bit) return;
-    uint8_t dst = MIDI_route_targets(bit, USB_MIDI_HOST_CIN_SINGLE_BYTE, status);
+    midi_tmask_t dst = MIDI_route_targets(bit, USB_MIDI_HOST_CIN_SINGLE_BYTE, status);
     MIDI_route_dispatch(bit, dst, USB_MIDI_HOST_CIN_SINGLE_BYTE, status, 0, 0);
 }
 
@@ -343,7 +343,7 @@ void MIDI_Clock_deinit(void)
     g_clock_running = false;
 }
 
-uint8_t MIDI_Clock_bit(void)
+midi_tmask_t MIDI_Clock_bit(void)
 {
     return g_clock_bit;
 }
@@ -859,7 +859,7 @@ int MIDI_Input_start_routing(void)
     return MIDI_Input_start();
 }
 
-int MIDI_route_start_source(uint8_t src_bit)
+int MIDI_route_start_source(midi_tmask_t src_bit)
 {
     if ((src_bit & MIDI_ROUTE_INPUT_SOURCES) == 0) return 0;
     /* The UART's own task keeps its RX buffer from overflowing; it needs the
@@ -1025,7 +1025,7 @@ void MIDI_Input_reset_external_clock(void)
     MIDI_Input_reset_external_clock_sam();
 }
 
-static midi_parser_t *parser_for(uint8_t src_bit)
+static midi_parser_t *parser_for(midi_tmask_t src_bit)
 {
     switch (src_bit) {
     case MIDI_TRANSPORT_USB:        return g_usb_parser;
@@ -1035,12 +1035,12 @@ static midi_parser_t *parser_for(uint8_t src_bit)
     }
 }
 
-float MIDI_Input_get_external_bpm_from(uint8_t src_bit)
+float MIDI_Input_get_external_bpm_from(midi_tmask_t src_bit)
 {
     return midi_parser_get_external_bpm(parser_for(src_bit));  /* NULL-safe */
 }
 
-void MIDI_Input_reset_external_clock_from(uint8_t src_bit)
+void MIDI_Input_reset_external_clock_from(midi_tmask_t src_bit)
 {
     midi_parser_t *p = parser_for(src_bit);
     if (p) midi_parser_reset_external_clock(p);
@@ -1050,7 +1050,7 @@ void MIDI_Input_reset_external_clock_from(uint8_t src_bit)
  * Filter queue (MIDI.filter / MIDI.on)
  * ======================================== */
 
-/* Each entry is 8 bytes. Deep enough for a chord or a burst of CCs while the
+/* Each entry is 12 bytes. Deep enough for a chord or a burst of CCs while the
  * script is between MIDI.sleep_ms / UI.process calls. */
 #ifndef MIDI_FILTER_QUEUE_SIZE
 #define MIDI_FILTER_QUEUE_SIZE 64
@@ -1077,7 +1077,7 @@ int MIDI_Filter_init(void)
     return 0;
 }
 
-bool MIDI_Filter_pop(uint16_t *dst, uint8_t *src, uint8_t *cin,
+bool MIDI_Filter_pop(uint32_t *dst, midi_tmask_t *src, uint8_t *cin,
                      uint8_t *b1, uint8_t *b2, uint8_t *b3)
 {
     midi_filter_event_t ev;
@@ -1125,7 +1125,7 @@ static volatile bool g_scheduler_running = false;
  * 3-byte channel-voice message to every registered transport selected
  * by transport_mask.
  */
-static void scheduler_send_packet(uint8_t transport_mask, uint8_t cin,
+static void scheduler_send_packet(midi_tmask_t transport_mask, uint8_t cin,
                                   uint8_t status, uint8_t data1, uint8_t data2)
 {
     MIDI_transport_send(transport_mask, 0, cin, status, data1, data2);
@@ -1189,7 +1189,7 @@ void MIDI_Note_scheduler_deinit(void)
     ESP_LOGI(SCHED_TAG, "Note scheduler deinitialized");
 }
 
-int MIDI_Note_trigger(uint8_t transport_mask, uint8_t channel, uint8_t note,
+int MIDI_Note_trigger(midi_tmask_t transport_mask, uint8_t channel, uint8_t note,
                       uint8_t velocity, uint32_t duration_ms)
 {
     /* Auto-initialize scheduler if needed */

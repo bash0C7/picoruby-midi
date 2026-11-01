@@ -9,27 +9,27 @@
 #include "../include/midi_transport.h"
 
 typedef struct {
-    volatile uint8_t src;    /* single transport bit; 0 = slot unused */
-    volatile uint8_t dst;    /* transport mask */
+    volatile midi_tmask_t src;   /* single transport bit; 0 = slot unused */
+    volatile midi_tmask_t dst;   /* transport mask */
     volatile uint32_t sel;   /* MIDI_ROUTE_SEL_* */
 } midi_route_t;
 
 typedef struct {
-    volatile uint8_t src;      /* single transport bit; 0 = slot unused */
+    volatile midi_tmask_t src; /* single transport bit; 0 = slot unused */
     volatile uint8_t overflow; /* MIDI_FILTER_OVERFLOW_* */
     volatile int8_t channel;   /* 0..15, or MIDI_ROUTE_ALL_CHANNELS */
-    volatile uint16_t dst;     /* one destination bit (or MIDI_ROUTE_DST_RUBY) */
+    volatile uint32_t dst;     /* one destination bit (or MIDI_ROUTE_DST_RUBY) */
     volatile uint16_t types;   /* bit n = CIN n */
 } midi_filter_t;
 
 static midi_route_t g_routes[MIDI_ROUTE_MAX];
 static midi_filter_t g_filters[MIDI_FILTER_MAX];
-static volatile uint8_t g_extra_sources;
+static volatile midi_tmask_t g_extra_sources;
 static midi_filter_sink_t g_filter_sink;
 static volatile uint32_t g_filter_overflows;
-static volatile uint8_t g_watch[2];   /* MIDI_WATCH_APP / MIDI_WATCH_SCRIPT */
+static volatile midi_tmask_t g_watch[2];   /* MIDI_WATCH_APP / MIDI_WATCH_SCRIPT */
 
-static bool single_bit(uint8_t b)
+static bool single_bit(midi_tmask_t b)
 {
     return b != 0 && (b & (b - 1)) == 0;
 }
@@ -52,17 +52,17 @@ int MIDI_route_channel(uint32_t sel)
     return MIDI_ROUTE_SEVERAL;
 }
 
-int MIDI_route_add(uint8_t src_bit, uint8_t dst_mask, int channel)
+int MIDI_route_add(midi_tmask_t src_bit, midi_tmask_t dst_mask, int channel)
 {
     uint32_t sel = MIDI_route_selection(channel);
     if (sel == 0) return -1;
     return MIDI_route_add_selection(src_bit, dst_mask, sel);
 }
 
-int MIDI_route_add_selection(uint8_t src_bit, uint8_t dst_mask, uint32_t sel)
+int MIDI_route_add_selection(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint32_t sel)
 {
     if (!single_bit(src_bit)) return -1;
-    dst_mask &= (uint8_t)~src_bit;            /* no echo back to the source */
+    dst_mask &= (midi_tmask_t)~src_bit;       /* no echo back to the source */
     if (dst_mask == 0) return -1;
     if (sel == 0 || (sel & ~(MIDI_ROUTE_SEL_CHANNELS | MIDI_ROUTE_SEL_CLOCK | MIDI_ROUTE_SEL_ALL))) return -1;
     if ((sel & MIDI_ROUTE_SEL_ALL) && sel != MIDI_ROUTE_SEL_ALL) return -1;
@@ -84,12 +84,12 @@ int MIDI_route_add_selection(uint8_t src_bit, uint8_t dst_mask, uint32_t sel)
     return -1;
 }
 
-int MIDI_route_remove(uint8_t src_bit, uint8_t dst_mask)
+int MIDI_route_remove(midi_tmask_t src_bit, midi_tmask_t dst_mask)
 {
     int dropped = 0;
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
         if (g_routes[i].src != src_bit) continue;
-        uint8_t left = g_routes[i].dst & (uint8_t)~dst_mask;
+        midi_tmask_t left = g_routes[i].dst & (midi_tmask_t)~dst_mask;
         if (left == 0) {
             g_routes[i].src = 0;              /* first: unpublishes the slot */
             g_routes[i].dst = 0;
@@ -113,15 +113,15 @@ void MIDI_route_clear(void)
     g_watch[MIDI_WATCH_SCRIPT] = 0;
 }
 
-void MIDI_route_set_watch(int owner, uint8_t src_mask)
+void MIDI_route_set_watch(int owner, midi_tmask_t src_mask)
 {
     if (owner != MIDI_WATCH_APP && owner != MIDI_WATCH_SCRIPT) return;
     g_watch[owner] = src_mask;
 }
 
-uint8_t MIDI_route_watched(void)
+midi_tmask_t MIDI_route_watched(void)
 {
-    return (uint8_t)(g_watch[MIDI_WATCH_APP] | g_watch[MIDI_WATCH_SCRIPT]);
+    return (midi_tmask_t)(g_watch[MIDI_WATCH_APP] | g_watch[MIDI_WATCH_SCRIPT]);
 }
 
 bool MIDI_route_active(void)
@@ -135,7 +135,7 @@ bool MIDI_route_active(void)
     return MIDI_route_watched() != 0;
 }
 
-bool MIDI_route_from(uint8_t src_bit)
+bool MIDI_route_from(midi_tmask_t src_bit)
 {
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
         if (g_routes[i].src == src_bit) return true;
@@ -146,10 +146,10 @@ bool MIDI_route_from(uint8_t src_bit)
     return (MIDI_route_watched() & src_bit) != 0;
 }
 
-bool MIDI_route_get_selection(int i, uint8_t *src_bit, uint8_t *dst_mask, uint32_t *sel)
+bool MIDI_route_get_selection(int i, midi_tmask_t *src_bit, midi_tmask_t *dst_mask, uint32_t *sel)
 {
     if (i < 0 || i >= MIDI_ROUTE_MAX) return false;
-    uint8_t src = g_routes[i].src;
+    midi_tmask_t src = g_routes[i].src;
     if (src == 0) return false;
     if (src_bit) *src_bit = src;
     if (dst_mask) *dst_mask = g_routes[i].dst;
@@ -157,7 +157,7 @@ bool MIDI_route_get_selection(int i, uint8_t *src_bit, uint8_t *dst_mask, uint32
     return true;
 }
 
-bool MIDI_route_get(int i, uint8_t *src_bit, uint8_t *dst_mask, int *channel)
+bool MIDI_route_get(int i, midi_tmask_t *src_bit, midi_tmask_t *dst_mask, int *channel)
 {
     uint32_t sel;
     if (!MIDI_route_get_selection(i, src_bit, dst_mask, &sel)) return false;
@@ -191,11 +191,11 @@ static bool packet_is_clock(uint8_t cin, uint8_t b1)
     }
 }
 
-uint8_t MIDI_route_targets(uint8_t src_bit, uint8_t cin, uint8_t b1)
+midi_tmask_t MIDI_route_targets(midi_tmask_t src_bit, uint8_t cin, uint8_t b1)
 {
     int ch = packet_channel(cin, b1);
     bool clock = packet_is_clock(cin, b1);
-    uint8_t dst = 0;
+    midi_tmask_t dst = 0;
     for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
         if (g_routes[i].src != src_bit) continue;
         uint32_t sel = g_routes[i].sel;
@@ -207,19 +207,19 @@ uint8_t MIDI_route_targets(uint8_t src_bit, uint8_t cin, uint8_t b1)
     return dst;
 }
 
-void MIDI_route_set_source(uint8_t bit, bool on)
+void MIDI_route_set_source(midi_tmask_t bit, bool on)
 {
     if (!single_bit(bit)) return;
     if (on) {
         g_extra_sources |= bit;
     } else {
-        g_extra_sources &= (uint8_t)~bit;
+        g_extra_sources &= (midi_tmask_t)~bit;
     }
 }
 
-uint8_t MIDI_route_sources(void)
+midi_tmask_t MIDI_route_sources(void)
 {
-    return (uint8_t)(MIDI_ROUTE_INPUT_SOURCES | g_extra_sources);
+    return (midi_tmask_t)(MIDI_ROUTE_INPUT_SOURCES | g_extra_sources);
 }
 
 /* --- Filters --------------------------------------------------------- */
@@ -229,19 +229,19 @@ void MIDI_route_set_filter_sink(midi_filter_sink_t sink)
     g_filter_sink = sink;
 }
 
-int MIDI_route_set_filter(uint8_t src_bit, uint16_t dst_mask, uint16_t types,
+int MIDI_route_set_filter(midi_tmask_t src_bit, uint32_t dst_mask, uint16_t types,
                           int channel, uint8_t overflow)
 {
     if (!single_bit(src_bit)) return -1;
-    dst_mask &= (uint16_t)~src_bit;
-    dst_mask &= (uint16_t)(0xFF | MIDI_ROUTE_DST_RUBY);
+    dst_mask &= ~(uint32_t)src_bit;
+    dst_mask &= MIDI_ROUTE_DST_ALL;
     if (dst_mask == 0 || types == 0) return -1;
     if (channel < MIDI_ROUTE_ALL_CHANNELS || channel > 15) return -1;
 
     /* One slot per destination bit, so removing one leaves the others. Check
      * there is room for all of them first, so a failure changes nothing. */
     int need = 0;
-    for (uint16_t bit = 1; bit <= MIDI_ROUTE_DST_RUBY; bit <<= 1) {
+    for (uint32_t bit = 1; bit <= MIDI_ROUTE_DST_RUBY; bit <<= 1) {
         if (!(dst_mask & bit)) continue;
         bool found = false;
         for (int i = 0; i < MIDI_FILTER_MAX; i++) {
@@ -255,7 +255,7 @@ int MIDI_route_set_filter(uint8_t src_bit, uint16_t dst_mask, uint16_t types,
     }
     if (need > free_slots) return -1;
 
-    for (uint16_t bit = 1; bit <= MIDI_ROUTE_DST_RUBY; bit <<= 1) {
+    for (uint32_t bit = 1; bit <= MIDI_ROUTE_DST_RUBY; bit <<= 1) {
         if (!(dst_mask & bit)) continue;
         midi_filter_t *f = NULL;
         for (int i = 0; i < MIDI_FILTER_MAX && !f; i++) {
@@ -276,7 +276,7 @@ int MIDI_route_set_filter(uint8_t src_bit, uint16_t dst_mask, uint16_t types,
     return 0;
 }
 
-int MIDI_route_clear_filter(uint8_t src_bit, uint16_t dst_mask)
+int MIDI_route_clear_filter(midi_tmask_t src_bit, uint32_t dst_mask)
 {
     int removed = 0;
     for (int i = 0; i < MIDI_FILTER_MAX; i++) {
@@ -288,9 +288,9 @@ int MIDI_route_clear_filter(uint8_t src_bit, uint16_t dst_mask)
     return removed;
 }
 
-uint16_t MIDI_route_filtered(uint8_t src_bit)
+uint32_t MIDI_route_filtered(midi_tmask_t src_bit)
 {
-    uint16_t dst = 0;
+    uint32_t dst = 0;
     for (int i = 0; i < MIDI_FILTER_MAX; i++) {
         if (g_filters[i].src == src_bit) dst |= g_filters[i].dst;
     }
@@ -302,29 +302,29 @@ uint32_t MIDI_route_filter_overflows(void)
     return g_filter_overflows;
 }
 
-void MIDI_route_dispatch(uint8_t src_bit, uint8_t dst_mask, uint8_t cin,
+void MIDI_route_dispatch(midi_tmask_t src_bit, midi_tmask_t dst_mask, uint8_t cin,
                          uint8_t b1, uint8_t b2, uint8_t b3)
 {
     cin &= 0x0F;
-    uint16_t divert = 0;
-    uint8_t bypass = 0;   /* diverted destinations that take it unfiltered on overflow */
+    uint32_t divert = 0;
+    midi_tmask_t bypass = 0;   /* diverted destinations that take it unfiltered on overflow */
 
     if (g_filter_sink) {
         int ch = packet_channel(cin, b1);
-        uint16_t candidates = (uint16_t)dst_mask | MIDI_ROUTE_DST_RUBY;
+        uint32_t candidates = (uint32_t)dst_mask | MIDI_ROUTE_DST_RUBY;
         for (int i = 0; i < MIDI_FILTER_MAX; i++) {
             if (g_filters[i].src != src_bit) continue;
-            uint16_t d = g_filters[i].dst;
+            uint32_t d = g_filters[i].dst;
             if (!(d & candidates)) continue;
             if (!(g_filters[i].types & (1u << cin))) continue;
             int fc = g_filters[i].channel;
             if (fc != MIDI_ROUTE_ALL_CHANNELS && fc != ch) continue;
             divert |= d;
-            if (g_filters[i].overflow == MIDI_FILTER_OVERFLOW_BYPASS) bypass |= (uint8_t)d;
+            if (g_filters[i].overflow == MIDI_FILTER_OVERFLOW_BYPASS) bypass |= (midi_tmask_t)d;
         }
     }
 
-    uint8_t direct = dst_mask & (uint8_t)~divert;
+    midi_tmask_t direct = dst_mask & (midi_tmask_t)~divert;
     if (divert) {
         midi_filter_event_t ev = { divert, src_bit, cin, b1, b2, b3 };
         if (!g_filter_sink(&ev)) {
@@ -338,7 +338,7 @@ void MIDI_route_dispatch(uint8_t src_bit, uint8_t dst_mask, uint8_t cin,
     }
 }
 
-void MIDI_route_packet(uint8_t src_bit, uint8_t cin,
+void MIDI_route_packet(midi_tmask_t src_bit, uint8_t cin,
                        uint8_t b1, uint8_t b2, uint8_t b3)
 {
     MIDI_route_dispatch(src_bit, MIDI_route_targets(src_bit, cin, b1), cin, b1, b2, b3);

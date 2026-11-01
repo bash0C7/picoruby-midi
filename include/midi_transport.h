@@ -67,7 +67,7 @@ typedef struct midi_transport {
  * transport, so a new transport gem only has to register itself; the
  * protocol layer never includes its headers.
  *
- * One bit of the uint8_t mask per transport, so at most
+ * One bit of the midi_tmask_t mask per transport, so at most
  * MIDI_TRANSPORT_REGISTRY_SIZE transports. The low bits are reserved for
  * the original built-ins and keep their historical values (0x01 USB host,
  * 0x02 UART, 0x04 USB device -- see MIDI_TRANSPORT_* in midi.h), so masks
@@ -77,28 +77,33 @@ typedef struct midi_transport {
  * The table is written once at start-up and only read afterwards; entries
  * are never freed while a scheduled note may still reference their bit.
  */
-#define MIDI_TRANSPORT_REGISTRY_SIZE      8
+#define MIDI_TRANSPORT_REGISTRY_SIZE      16
 #define MIDI_TRANSPORT_FIRST_DYNAMIC_BIT  0x08
+
+/* A set of transports, one bit each (a single bit names one). Widen it
+ * together with MIDI_TRANSPORT_REGISTRY_SIZE. */
+typedef uint16_t midi_tmask_t;
+#define MIDI_TMASK_ALL ((midi_tmask_t)0xFFFFu)
 
 /* Register `t` under a fixed bit (one of the reserved built-in bits).
  * Returns 0 on success, -1 if `bit` is not a single bit or is taken by a
  * different transport. Registering the same transport twice is a no-op. */
-int MIDI_transport_register_at(uint8_t bit, const midi_transport_t *t);
+int MIDI_transport_register_at(midi_tmask_t bit, const midi_transport_t *t);
 
 /* Register `t` under the next free dynamic bit and return that bit, or 0
  * when the table is full. Registering the same transport again returns
  * the bit it already has. */
-uint8_t MIDI_transport_register(const midi_transport_t *t);
+midi_tmask_t MIDI_transport_register(const midi_transport_t *t);
 
 /* Remove whatever is registered under `bit`. */
-void MIDI_transport_unregister(uint8_t bit);
+void MIDI_transport_unregister(midi_tmask_t bit);
 
 /* The transport registered under `bit`, or NULL. */
-const midi_transport_t *MIDI_transport_get(uint8_t bit);
+const midi_transport_t *MIDI_transport_get(midi_tmask_t bit);
 
 /* Send one USB-MIDI packet to every registered transport whose bit is set
  * in `mask`. Unregistered bits are ignored. */
-void MIDI_transport_send(uint8_t mask, uint8_t cable, uint8_t cin,
+void MIDI_transport_send(midi_tmask_t mask, uint8_t cable, uint8_t cin,
                          uint8_t b1, uint8_t b2, uint8_t b3);
 
 #ifdef __cplusplus

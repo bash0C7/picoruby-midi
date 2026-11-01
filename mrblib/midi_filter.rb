@@ -22,7 +22,7 @@
 # sends messages on unfiltered (overflow: :bypass, the default) or drops
 # them (overflow: :drop).
 
-# "src * 0x1000 + dst" => [[types, channel, overflow, block, warned, spec], ...]
+# MIDI._pair_key(src, dst) => [[types, channel, overflow, block, warned, spec], ...]
 $__midi_filters__ = {}
 $__midi_filter_ready__ = false
 # Route source bit => [key Symbol, MIDI::Device or nil], see MIDI._set_source_info
@@ -30,14 +30,19 @@ $__midi_source_info__ = {}
 # Called at the top of every run_filters (UI::MIDIDevices.input follows the
 # selected IN from one)
 $__midi_filter_hooks__ = []
-# Chains of named filters (midi_filter_class.rb): src * 0x1000 + dst => chain
+# Chains of named filters (midi_filter_class.rb): MIDI._pair_key(src, dst) => chain
 $__midi_chains__ = {}
 # MIDI::Filter#every timers, run from run_filters
 $__midi_filter_timers__ = []
 
 module MIDI
-  # Destination of a listener (MIDI.on): Ruby itself, not a transport.
-  DST_RUBY = 0x100
+  # Destination of a listener (MIDI.on): Ruby itself, not a transport -- the
+  # bit above the 16 transport bits (MIDI_ROUTE_DST_RUBY)
+  DST_RUBY = 0x10000
+  # Every transport (MIDI_TMASK_ALL)
+  ALL_TRANSPORTS = 0xFFFF
+  # _pair_key: a source's slot, room for every destination up to DST_RUBY
+  PAIR_KEY_STRIDE = DST_RUBY * 2
 
   # Message#source of the built-in route sources
   BUILTIN_SOURCES = { 0x01 => :usb_host, 0x02 => :uart, 0x04 => :usb_dev }
@@ -263,7 +268,7 @@ module MIDI
         return false unless route(from, to)
       end
 
-      key = src * 0x1000 + dst
+      key = _pair_key(src, dst)
       list = $__midi_filters__[key] || []
       list << [tlist, channel, overflow == :drop ? 1 : 0, block, false, types]
       unless _filter_apply(src, dst, list)
@@ -292,9 +297,10 @@ module MIDI
           removed += 1
         end
       end
+      skey = _pair_key(src, 0)
       $__midi_filters__.keys.each do |key|
-        next unless key / 0x1000 == src
-        dst = key % 0x1000
+        next unless key - key % PAIR_KEY_STRIDE == skey
+        dst = key % PAIR_KEY_STRIDE
         next if dst == DST_RUBY || (!only.nil? && dst != only)
         list = $__midi_filters__[key]
         before = list.size
@@ -321,7 +327,7 @@ module MIDI
       handler = filter(from, nil, types: types, channel: channel, &block)
       return false unless handler
       # Remember how it was asked for, for MIDI.off(from, type)
-      $__midi_filters__[route_bit(from) * 0x1000 + DST_RUBY].last[5] = type
+      $__midi_filters__[_pair_key(route_bit(from), DST_RUBY)].last[5] = type
       handler
     end
 
@@ -330,7 +336,7 @@ module MIDI
     # @return [Integer] listeners removed
     def off(from, type = nil, handler = nil)
       src = route_bit(from)
-      key = src * 0x1000 + DST_RUBY
+      key = _pair_key(src, DST_RUBY)
       list = $__midi_filters__[key]
       return 0 unless list
       before = list.size
@@ -386,6 +392,15 @@ module MIDI
     # registers its devices here).
     def _set_source_info(bit, key, device)
       $__midi_source_info__[bit] = [key, device]
+    end
+
+    # The key of the pair (src, dst) in $__midi_filters__ / $__midi_chains__.
+    # The source counts by its bit's position, so keys stay small (mruby/c's
+    # Integer may be 32 bits) with destinations up to DST_RUBY.
+    def _pair_key(src, dst)
+      i = 0
+      i += 1 while (src >> i) > 1
+      i * PAIR_KEY_STRIDE + dst
     end
 
     # Internal: wait up to `ms` for the filter queue, running the filters as
@@ -507,7 +522,7 @@ module MIDI
 
     # Store (src, dst)'s list, or drop it from Ruby and C when empty.
     def _filter_store(src, dst, list)
-      key = src * 0x1000 + dst
+      key = _pair_key(src, dst)
       if list.size == 0
         $__midi_filters__.delete(key)
         _filter_clear(src, dst)
@@ -523,10 +538,11 @@ module MIDI
       info = $__midi_source_info__[src]
       source = info ? info[0] : BUILTIN_SOURCES[src]
       device = info ? info[1] : nil
+      skey = _pair_key(src, 0)
       bit = 1
       while bit <= DST_RUBY
         if (dst & bit) != 0
-          list = $__midi_filters__[src * 0x1000 + bit]
+          list = $__midi_filters__[skey + bit]
           if list
             # A fresh Message per destination: the blocks may change it
             m = Message._from_packet(ev[2], ev[3], ev[4], ev[5], source, device)

@@ -23,8 +23,9 @@
 } while (0)
 
 /* Fake transports: count packets and remember the last one. */
-static int g_hits[8];
-static uint8_t g_last[8][4];
+#define FAKES MIDI_TRANSPORT_REGISTRY_SIZE
+static int g_hits[FAKES];
+static uint8_t g_last[FAKES][4];
 
 static int fake_send(void *ctx, uint8_t cable, uint8_t cin,
                      uint8_t b1, uint8_t b2, uint8_t b3)
@@ -37,7 +38,7 @@ static int fake_send(void *ctx, uint8_t cable, uint8_t cin,
 }
 
 static const midi_transport_ops_t fake_ops = { .send_packet = fake_send };
-static midi_transport_t g_t[8];
+static midi_transport_t g_t[FAKES];
 
 static void reset_hits(void) { memset(g_hits, 0, sizeof(g_hits)); }
 
@@ -55,7 +56,7 @@ static bool fake_sink(const midi_filter_event_t *ev)
 
 int main(void)
 {
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < FAKES; i++) {
         g_t[i].ops = &fake_ops;
         g_t[i].ctx = (void *)(intptr_t)i;
     }
@@ -73,6 +74,26 @@ int main(void)
     EXPECT_EQ(g_hits[0], 1); EXPECT_EQ(g_hits[1], 1); EXPECT_EQ(g_hits[2], 0);
     MIDI_transport_unregister(0x10);
     EXPECT_EQ((intptr_t)MIDI_transport_get(0x10), 0);
+    reset_hits();
+
+    printf("registry: 16 transports\n");
+    for (int i = 4; i < FAKES; i++) {
+        EXPECT_EQ(MIDI_transport_register(&g_t[i]), 1u << i);
+    }
+    EXPECT_EQ(MIDI_transport_register(&g_t[0] + 0), 0x01);    /* already there */
+    {
+        midi_transport_t extra = { &fake_ops, (void *)(intptr_t)0 };
+        EXPECT_EQ(MIDI_transport_register(&extra), 0);        /* full */
+    }
+    MIDI_transport_send(0x8000 | 0x4000, 0, 0x9, 0x90, 60, 100);
+    EXPECT_EQ(g_hits[15], 1); EXPECT_EQ(g_hits[14], 1); EXPECT_EQ(g_hits[13], 0);
+    EXPECT_EQ(MIDI_route_add(0x8000, 0x01 | 0x4000, MIDI_ROUTE_ALL_CHANNELS), 0);
+    MIDI_route_packet(0x8000, 0x9, 0x90, 60, 100);
+    EXPECT_EQ(g_hits[0], 1); EXPECT_EQ(g_hits[14], 2); EXPECT_EQ(g_hits[15], 1);
+    EXPECT_EQ(MIDI_route_targets(0x8000, 0x9, 0x90), 0x4001);
+    EXPECT_EQ(MIDI_route_remove(0x8000, MIDI_TMASK_ALL), 1);
+    EXPECT_EQ(MIDI_route_active(), 0);
+    for (int i = 4; i < FAKES; i++) MIDI_transport_unregister((midi_tmask_t)(1u << i));
     reset_hits();
 
     printf("route: arguments\n");
@@ -115,7 +136,7 @@ int main(void)
     EXPECT_EQ(MIDI_route_remove(0x01, 0x08), 1);      /* ch0 route had only 0x08 */
     MIDI_route_packet(0x01, 0xB, 0xB0, 74, 64);
     EXPECT_EQ(g_hits[3], 0); EXPECT_EQ(g_hits[2], 1);
-    EXPECT_EQ(MIDI_route_remove(0x01, 0xFF), 1);
+    EXPECT_EQ(MIDI_route_remove(0x01, MIDI_TMASK_ALL), 1);
     EXPECT_EQ(MIDI_route_active(), 1);                /* the UART route is left */
     EXPECT_EQ(MIDI_route_from(0x01), 0);
     EXPECT_EQ(MIDI_route_from(0x02), 1);
@@ -123,8 +144,9 @@ int main(void)
     EXPECT_EQ(MIDI_route_active(), 0);
 
     printf("route: table full\n");
-    for (int ch = 0; ch < MIDI_ROUTE_MAX; ch++) {
-        EXPECT_EQ(MIDI_route_add(0x01, 0x08, ch), 0);
+    for (int i = 0; i < MIDI_ROUTE_MAX; i++) {           /* a selection of its own each */
+        uint32_t sel = (i < 16) ? (1u << i) : ((1u << (i - 16)) | MIDI_ROUTE_SEL_CLOCK);
+        EXPECT_EQ(MIDI_route_add_selection(0x01, 0x08, sel), 0);
     }
     EXPECT_EQ(MIDI_route_add(0x01, 0x08, MIDI_ROUTE_ALL_CHANNELS), -1);
     EXPECT_EQ(MIDI_route_add(0x01, 0x04, 0), 0);      /* merging still works */
@@ -182,7 +204,7 @@ int main(void)
     EXPECT_EQ(MIDI_route_from(0x04), 1);
     MIDI_route_packet(0x04, 0xB, 0xB0, 74, 1);
     EXPECT_EQ(g_sunk_n, 1); EXPECT_EQ(g_sunk[0].dst, MIDI_ROUTE_DST_RUBY);
-    for (int i = 0; i < 8; i++) EXPECT_EQ(g_hits[i], 0);
+    for (int i = 0; i < FAKES; i++) EXPECT_EQ(g_hits[i], 0);
     g_sunk_n = 0;
 
     printf("filter: listener and route filter share one event\n");
@@ -213,10 +235,10 @@ int main(void)
     printf("filter: clear\n");
     EXPECT_EQ(MIDI_route_clear_filter(0x01, 0x08), 1);
     EXPECT_EQ(MIDI_route_filtered(0x01), MIDI_ROUTE_DST_RUBY);
-    EXPECT_EQ(MIDI_route_clear_filter(0x01, 0xFFFF), 1);
+    EXPECT_EQ(MIDI_route_clear_filter(0x01, MIDI_ROUTE_DST_ALL), 1);
     MIDI_route_packet(0x01, 0x9, 0x99, 36, 100);
     EXPECT_EQ(g_hits[3], 1); EXPECT_EQ(g_sunk_n, 0);
-    MIDI_route_remove(0x01, 0xFF);
+    MIDI_route_remove(0x01, MIDI_TMASK_ALL);
     EXPECT_EQ(MIDI_route_active(), 1);                /* filters from 0x04 / 0x10 */
     MIDI_route_clear();
     EXPECT_EQ(MIDI_route_active(), 0);
@@ -225,15 +247,15 @@ int main(void)
 
     printf("filter: table full changes nothing\n");
     for (int s = 0; s < 8; s++) {
-        EXPECT_EQ(MIDI_route_set_filter((uint8_t)(1 << s), MIDI_ROUTE_DST_RUBY, 0x0200, -1, 0), 0);
+        EXPECT_EQ(MIDI_route_set_filter((midi_tmask_t)(1 << s), MIDI_ROUTE_DST_RUBY, 0x0200, -1, 0), 0);
     }
     for (int s = 0; s < 7; s++) {
-        EXPECT_EQ(MIDI_route_set_filter((uint8_t)(1 << s), 0x80, 0x0200, -1, 0), 0);
+        EXPECT_EQ(MIDI_route_set_filter((midi_tmask_t)(1 << s), 0x8000, 0x0200, -1, 0), 0);
     }
-    EXPECT_EQ(MIDI_route_set_filter(0x80, 0x01, 0x0200, -1, 0), 0);  /* 16th slot */
+    EXPECT_EQ(MIDI_route_set_filter(0x8000, 0x01, 0x0200, -1, 0), 0);  /* 16th slot */
     EXPECT_EQ(MIDI_route_set_filter(0x01, 0x02 | 0x04, 0x0200, -1, 0), -1);
-    EXPECT_EQ(MIDI_route_filtered(0x01), 0x80 | MIDI_ROUTE_DST_RUBY);  /* untouched */
-    EXPECT_EQ(MIDI_route_set_filter(0x01, 0x80, 0x0300, -1, 0), 0);    /* replacing still works */
+    EXPECT_EQ(MIDI_route_filtered(0x01), 0x8000 | MIDI_ROUTE_DST_RUBY);  /* untouched */
+    EXPECT_EQ(MIDI_route_set_filter(0x01, 0x8000, 0x0300, -1, 0), 0);    /* replacing still works */
     MIDI_route_clear();
     MIDI_route_set_filter_sink(NULL);
 
@@ -269,7 +291,7 @@ int main(void)
     EXPECT_EQ(MIDI_route_add_selection(0x01, 0x08, sel), 0);
     EXPECT_EQ(MIDI_route_add_selection(0x01, 0x02, sel), 0);          /* merged */
     {
-        uint8_t src = 0, dst = 0;
+        midi_tmask_t src = 0, dst = 0;
         uint32_t got = 0;
         int ch = 0;
         EXPECT_EQ(MIDI_route_get_selection(0, &src, &dst, &got), 1);
@@ -301,7 +323,7 @@ int main(void)
     EXPECT_EQ(MIDI_route_from(0x01), 0);
     EXPECT_EQ(MIDI_route_active(), 1);
     MIDI_route_packet(0x04, 0xF, 0xF8, 0, 0);         /* watched, not routed: sent nowhere */
-    for (int i = 0; i < 8; i++) EXPECT_EQ(g_hits[i], 0);
+    for (int i = 0; i < FAKES; i++) EXPECT_EQ(g_hits[i], 0);
     MIDI_route_clear();                               /* the script's go, the app's stay */
     EXPECT_EQ(MIDI_route_watched(), 0x04);
     MIDI_route_set_watch(MIDI_WATCH_APP, 0);

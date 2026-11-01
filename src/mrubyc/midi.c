@@ -243,7 +243,7 @@ c_midi_trigger(mrbc_vm *vm, mrbc_value v[], int argc)
         return;
     }
 
-    uint8_t transport_mask = (uint8_t)GET_INT_ARG(1);
+    midi_tmask_t transport_mask = (midi_tmask_t)GET_INT_ARG(1);
     uint8_t channel = (uint8_t)GET_INT_ARG(2);
     uint8_t note = (uint8_t)GET_INT_ARG(3);
     uint8_t velocity = (uint8_t)GET_INT_ARG(4);
@@ -535,7 +535,7 @@ c_midi_route_add(mrbc_vm *vm, mrbc_value v[], int argc)
         SET_INT_RETURN(-1);
         return;
     }
-    SET_INT_RETURN(MIDI_route_add((uint8_t)GET_INT_ARG(1), (uint8_t)GET_INT_ARG(2),
+    SET_INT_RETURN(MIDI_route_add((midi_tmask_t)GET_INT_ARG(1), (midi_tmask_t)GET_INT_ARG(2),
                                   (int)GET_INT_ARG(3)));
 }
 
@@ -550,7 +550,7 @@ c_midi_route_add_sel(mrbc_vm *vm, mrbc_value v[], int argc)
         SET_INT_RETURN(-1);
         return;
     }
-    SET_INT_RETURN(MIDI_route_add_selection((uint8_t)GET_INT_ARG(1), (uint8_t)GET_INT_ARG(2),
+    SET_INT_RETURN(MIDI_route_add_selection((midi_tmask_t)GET_INT_ARG(1), (midi_tmask_t)GET_INT_ARG(2),
                                             (uint32_t)GET_INT_ARG(3)));
 }
 
@@ -564,7 +564,7 @@ c_midi_route_remove(mrbc_vm *vm, mrbc_value v[], int argc)
         SET_INT_RETURN(0);
         return;
     }
-    SET_INT_RETURN(MIDI_route_remove((uint8_t)GET_INT_ARG(1), (uint8_t)GET_INT_ARG(2)));
+    SET_INT_RETURN(MIDI_route_remove((midi_tmask_t)GET_INT_ARG(1), (midi_tmask_t)GET_INT_ARG(2)));
 }
 
 /*
@@ -601,10 +601,10 @@ c_midi_route_sources(mrbc_vm *vm, mrbc_value v[], int argc)
 static void
 c_midi_route_targets_of(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    uint8_t s, d, all = 0;
+    midi_tmask_t s, d, all = 0;
     if (argc >= 1) {
         for (int i = 0; i < MIDI_ROUTE_MAX; i++) {
-            if (MIDI_route_get(i, &s, &d, NULL) && s == (uint8_t)GET_INT_ARG(1)) all |= d;
+            if (MIDI_route_get(i, &s, &d, NULL) && s == (midi_tmask_t)GET_INT_ARG(1)) all |= d;
         }
     }
     SET_INT_RETURN(all);
@@ -616,7 +616,7 @@ c_midi_route_targets_of(mrbc_vm *vm, mrbc_value v[], int argc)
 static void
 c_midi_route_get(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    uint8_t src, dst;
+    midi_tmask_t src, dst;
     uint32_t sel;
     if (argc < 1 || !MIDI_route_get_selection((int)GET_INT_ARG(1), &src, &dst, &sel)) {
         SET_NIL_RETURN();
@@ -632,12 +632,12 @@ c_midi_route_get(mrbc_vm *vm, mrbc_value v[], int argc)
 }
 
 /*
- * MIDI._route_filtered(src_bit) -> destinations with a filter (0x100 = Ruby)
+ * MIDI._route_filtered(src_bit) -> destinations with a filter (MIDI::DST_RUBY = Ruby)
  */
 static void
 c_midi_route_filtered(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    SET_INT_RETURN(argc >= 1 ? MIDI_route_filtered((uint8_t)GET_INT_ARG(1)) : 0);
+    SET_INT_RETURN(argc >= 1 ? (mrbc_int_t)MIDI_route_filtered((midi_tmask_t)GET_INT_ARG(1)) : 0);
 }
 
 /*
@@ -646,7 +646,7 @@ c_midi_route_filtered(mrbc_vm *vm, mrbc_value v[], int argc)
 static void
 c_midi_transport_connected(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    const midi_transport_t *t = argc >= 1 ? MIDI_transport_get((uint8_t)GET_INT_ARG(1)) : NULL;
+    const midi_transport_t *t = argc >= 1 ? MIDI_transport_get((midi_tmask_t)GET_INT_ARG(1)) : NULL;
     if (t && t->ops && t->ops->is_connected && t->ops->is_connected(t->ctx)) {
         SET_TRUE_RETURN();
     } else {
@@ -660,7 +660,7 @@ c_midi_transport_connected(mrbc_vm *vm, mrbc_value v[], int argc)
 static void
 c_midi_route_watch(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    if (argc >= 1) MIDI_route_set_watch(MIDI_WATCH_SCRIPT, (uint8_t)GET_INT_ARG(1));
+    if (argc >= 1) MIDI_route_set_watch(MIDI_WATCH_SCRIPT, (midi_tmask_t)GET_INT_ARG(1));
     SET_NIL_RETURN();
 }
 
@@ -671,7 +671,7 @@ static void
 c_midi_transport_send(mrbc_vm *vm, mrbc_value v[], int argc)
 {
     if (argc >= 5) {
-        MIDI_transport_send((uint8_t)GET_INT_ARG(1), 0, (uint8_t)(GET_INT_ARG(2) & 0x0F),
+        MIDI_transport_send((midi_tmask_t)GET_INT_ARG(1), 0, (uint8_t)(GET_INT_ARG(2) & 0x0F),
                             (uint8_t)GET_INT_ARG(3), (uint8_t)GET_INT_ARG(4),
                             (uint8_t)GET_INT_ARG(5));
     }
@@ -694,7 +694,7 @@ c_midi_filter_set(mrbc_vm *vm, mrbc_value v[], int argc)
         SET_INT_RETURN(-1);
         return;
     }
-    SET_INT_RETURN(MIDI_route_set_filter((uint8_t)GET_INT_ARG(1), (uint16_t)GET_INT_ARG(2),
+    SET_INT_RETURN(MIDI_route_set_filter((midi_tmask_t)GET_INT_ARG(1), (uint32_t)GET_INT_ARG(2),
                                          (uint16_t)GET_INT_ARG(3), (int)GET_INT_ARG(4),
                                          (uint8_t)GET_INT_ARG(5)));
 }
@@ -706,19 +706,20 @@ c_midi_filter_clear(mrbc_vm *vm, mrbc_value v[], int argc)
         SET_INT_RETURN(0);
         return;
     }
-    SET_INT_RETURN(MIDI_route_clear_filter((uint8_t)GET_INT_ARG(1), (uint16_t)GET_INT_ARG(2)));
+    SET_INT_RETURN(MIDI_route_clear_filter((midi_tmask_t)GET_INT_ARG(1), (uint32_t)GET_INT_ARG(2)));
 }
 
 static void
 c_midi_filter_pop(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    uint16_t dst;
-    uint8_t src, cin, b1, b2, b3;
+    uint32_t dst;
+    midi_tmask_t src;
+    uint8_t cin, b1, b2, b3;
     if (!MIDI_Filter_pop(&dst, &src, &cin, &b1, &b2, &b3)) {
         SET_NIL_RETURN();
         return;
     }
-    int vals[6] = { dst, src, cin, b1, b2, b3 };
+    int vals[6] = { (int)dst, src, cin, b1, b2, b3 };
     mrbc_value arr = mrbc_array_new(vm, 6);
     for (int i = 0; i < 6; i++) {
         mrbc_value iv = mrbc_integer_value(vals[i]);
@@ -754,14 +755,14 @@ c_midi_filter_overflows(mrbc_vm *vm, mrbc_value v[], int argc)
 static void
 c_midi_external_bpm_from(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    float bpm = argc >= 1 ? MIDI_Input_get_external_bpm_from((uint8_t)GET_INT_ARG(1)) : 0.0f;
+    float bpm = argc >= 1 ? MIDI_Input_get_external_bpm_from((midi_tmask_t)GET_INT_ARG(1)) : 0.0f;
     SET_FLOAT_RETURN(bpm);
 }
 
 static void
 c_midi_reset_external_clock_from(mrbc_vm *vm, mrbc_value v[], int argc)
 {
-    if (argc >= 1) MIDI_Input_reset_external_clock_from((uint8_t)GET_INT_ARG(1));
+    if (argc >= 1) MIDI_Input_reset_external_clock_from((midi_tmask_t)GET_INT_ARG(1));
     SET_NIL_RETURN();
 }
 
