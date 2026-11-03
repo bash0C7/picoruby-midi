@@ -150,6 +150,13 @@ int MIDI_Input_start_routing(void);
  * or 0. */
 int MIDI_route_start_source(midi_tmask_t src_bit);
 
+/* Have the input task read transport `bit` like the USB host (0x01): its
+ * read_bytes gives 4-byte USB-MIDI packets, forwarded along the routes from
+ * it. Also declares it a route source. Read only while it is connected and a
+ * route, filter or watch starts from it (else its packets stay in its buffer).
+ * For transports beyond the built-ins, e.g. a second device on a USB hub. */
+void MIDI_Input_add_packet_source(midi_tmask_t bit);
+
 /* Stop background processing task */
 void MIDI_Input_stop(void);
 
