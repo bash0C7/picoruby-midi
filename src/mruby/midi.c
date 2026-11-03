@@ -163,10 +163,17 @@ mrb_midi_route_clear(mrb_state *mrb, mrb_value self)
     return mrb_nil_value();
 }
 
-/* MIDI._route_start -> 0 / -1 */
+/* MIDI._route_start(src_bit = nil) -> 0 / -1. With a bit, whatever reads
+ * that source (MIDI_route_start_source: nothing for one that pushes its own
+ * packets) */
 static mrb_value
 mrb_midi_route_start(mrb_state *mrb, mrb_value self)
 {
+    mrb_value bit = mrb_nil_value();
+    mrb_get_args(mrb, "|o", &bit);
+    if (mrb_integer_p(bit)) {
+        return mrb_fixnum_value(MIDI_route_start_source((midi_tmask_t)mrb_integer(bit)));
+    }
     return mrb_fixnum_value(MIDI_Input_start_routing());
 }
 
@@ -675,7 +682,7 @@ mrb_picoruby_midi_gem_init(mrb_state *mrb)
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_clear),
                                   mrb_midi_route_clear, MRB_ARGS_NONE());
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_start),
-                                  mrb_midi_route_start, MRB_ARGS_NONE());
+                                  mrb_midi_route_start, MRB_ARGS_OPT(1));
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_sources),
                                   mrb_midi_route_sources, MRB_ARGS_NONE());
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_route_targets_of),

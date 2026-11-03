@@ -141,8 +141,10 @@ module MIDI
     # Internal: make sure something reads `from` now that a route or filter
     # starts there.
     def _start_source(from, src)
-      # The other sources push their packets themselves: no input task
-      return if (src & ROUTE_SOURCES) == 0
+      # Beyond the built-ins C knows what reads a source: the input task for
+      # further USB host devices (on a hub), nothing for one that pushes its
+      # own packets (UI::Keys, the clock)
+      return _route_start(src) if (src & ROUTE_SOURCES) == 0
 
       # A UART transport reads only once its own input is started.
       transport = from.respond_to?(:transport) ? from.transport : from

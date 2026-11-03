@@ -35,8 +35,9 @@ module MIDI
       $stub[:filters] = {}
     end
 
-    def _route_start
-      $stub[:started] += 1
+    # With a bit: a source beyond the built-ins (C starts what reads it)
+    def _route_start(src = nil)
+      $stub[:started] += 1 if src.nil?
       0
     end
 

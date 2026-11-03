@@ -578,11 +578,17 @@ c_midi_route_clear(mrbc_vm *vm, mrbc_value v[], int argc)
 }
 
 /*
- * MIDI._route_start -> 0 / -1 (input task for routing; -1 = no source yet)
+ * MIDI._route_start(src_bit = nil) -> 0 / -1 (input task for routing; -1 = no
+ * source yet). With a bit, whatever reads that source (MIDI_route_start_source:
+ * nothing for one that pushes its own packets)
  */
 static void
 c_midi_route_start(mrbc_vm *vm, mrbc_value v[], int argc)
 {
+    if (argc >= 1 && v[1].tt == MRBC_TT_INTEGER) {
+        SET_INT_RETURN(MIDI_route_start_source((midi_tmask_t)v[1].i));
+        return;
+    }
     SET_INT_RETURN(MIDI_Input_start_routing());
 }
 
