@@ -162,6 +162,11 @@ void MIDI_Input_add_packet_source(midi_tmask_t bit);
  * rest are ignored). Measured only while the input task reads it. */
 void MIDI_Input_track_clock(midi_tmask_t bit);
 
+/* Have the input task make a pass now instead of at its next poll (any
+ * task or esp_timer callback; not from an ISR). For packet sources that
+ * know when their input is there (midi_timed_ring.h). */
+void MIDI_Input_kick(void);
+
 /* Stop background processing task */
 void MIDI_Input_stop(void);
 

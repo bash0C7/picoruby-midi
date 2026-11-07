@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "../../include/midi.h"
@@ -458,6 +459,10 @@ static volatile bool g_queue_events = false;
 
 /* Task handle */
 static TaskHandle_t g_input_task = NULL;
+/* MIDI_Input_kick: wakes the task's wait between passes. A semaphore, not a
+ * task notification, so that it outlives the task (which ends and starts
+ * again with the sources). */
+static SemaphoreHandle_t g_input_wake = NULL;
 static volatile bool g_input_running = false;
 static volatile bool g_input_was_started = false;  /* Track if input was ever started (for auto-restart) */
 
@@ -555,6 +560,12 @@ static struct {
     volatile midi_tmask_t bit;
     midi_parser_t *parser;
 } g_tracked[MIDI_CLOCK_TRACKED_MAX];
+
+void MIDI_Input_kick(void)
+{
+    SemaphoreHandle_t w = g_input_wake;
+    if (w && g_input_running) xSemaphoreGive(w);
+}
 
 void MIDI_Input_track_clock(midi_tmask_t bit)
 {
@@ -740,7 +751,9 @@ static void midi_input_task(void *arg)
          * at priority 1, but above the Ruby VM it starved the VM (no
          * UI.process, no scripts) for as long as a USB device was plugged in. */
         TickType_t wait = pdMS_TO_TICKS(MIDI_INPUT_POLL_MS);
-        vTaskDelay(wait > 0 ? wait : 1);
+        if (wait == 0) wait = 1;
+        if (g_input_wake) xSemaphoreTake(g_input_wake, wait);
+        else vTaskDelay(wait);
     }
 
     /* Mark as not running before cleanup */
@@ -882,6 +895,8 @@ int MIDI_Input_start(void)
     midi_parser_reset(g_usb_parser);
     midi_parser_reset(g_sam_parser);
     midi_parser_reset(g_usbdev_parser);
+
+    if (g_input_wake == NULL) g_input_wake = xSemaphoreCreateBinary();
 
     g_input_running = true;
     BaseType_t ret = xTaskCreatePinnedToCore(
