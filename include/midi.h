@@ -157,6 +157,11 @@ int MIDI_route_start_source(midi_tmask_t src_bit);
  * For transports beyond the built-ins, e.g. a second device on a USB hub. */
 void MIDI_Input_add_packet_source(midi_tmask_t bit);
 
+/* Measure the external clock (BPM, MIDI_Input_get_external_bpm_from) of
+ * packet source `bit` too, like the built-ins. A few sources at most (the
+ * rest are ignored). Measured only while the input task reads it. */
+void MIDI_Input_track_clock(midi_tmask_t bit);
+
 /* Stop background processing task */
 void MIDI_Input_stop(void);
 

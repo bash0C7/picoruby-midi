@@ -548,6 +548,37 @@ void MIDI_Input_add_packet_source(midi_tmask_t bit)
     MIDI_route_set_source(bit, true);
 }
 
+/* External clock tracking (BPM) for packet sources: a parser per source
+ * asked for (MIDI_Input_track_clock), fed by the input task. */
+#define MIDI_CLOCK_TRACKED_MAX 4
+static struct {
+    volatile midi_tmask_t bit;
+    midi_parser_t *parser;
+} g_tracked[MIDI_CLOCK_TRACKED_MAX];
+
+void MIDI_Input_track_clock(midi_tmask_t bit)
+{
+    if (bit == 0 || (bit & (bit - 1)) != 0) return;
+    for (int i = 0; i < MIDI_CLOCK_TRACKED_MAX; i++) {
+        if (g_tracked[i].bit == bit) return;
+    }
+    for (int i = 0; i < MIDI_CLOCK_TRACKED_MAX; i++) {
+        if (g_tracked[i].bit == 0) {
+            g_tracked[i].parser = midi_parser_new(MIDI_SOURCE_USB);
+            if (g_tracked[i].parser) g_tracked[i].bit = bit;
+            return;
+        }
+    }
+}
+
+static midi_parser_t *tracked_parser(midi_tmask_t bit)
+{
+    for (int i = 0; i < MIDI_CLOCK_TRACKED_MAX; i++) {
+        if (g_tracked[i].bit == bit) return g_tracked[i].parser;
+    }
+    return NULL;
+}
+
 static midi_tmask_t packet_sources_wanted(void)
 {
     midi_tmask_t want = 0;
@@ -689,9 +720,16 @@ static void midi_input_task(void *arg)
             while (t->ops->bytes_available(t->ctx) >= 4) {
                 int read_len = t->ops->read_bytes(t->ctx, buffer, sizeof(buffer));
                 if (read_len <= 0) break;
+                midi_parser_t *clock = tracked_parser(bit);
                 for (int i = 0; i + 3 < read_len; i += 4) {
                     MIDI_route_packet(bit, buffer[i] & 0x0F,
                                       buffer[i + 1], buffer[i + 2], buffer[i + 3]);
+                    if (clock && midi_parser_feed_usb(clock, buffer[i] & 0x0F,
+                                                      buffer[i + 1], buffer[i + 2], buffer[i + 3],
+                                                      (uint64_t)esp_timer_get_time(), &event)
+                        && event.sysex_data) {
+                        free(event.sysex_data);   /* parsed for the clock only */
+                    }
                 }
             }
         }
@@ -1077,7 +1115,7 @@ static midi_parser_t *parser_for(midi_tmask_t src_bit)
     case MIDI_TRANSPORT_USB:        return g_usb_parser;
     case MIDI_TRANSPORT_SAM2695:    return g_sam_parser;
     case MIDI_TRANSPORT_USB_DEVICE: return g_usbdev_parser;
-    default:                        return NULL;
+    default:                        return tracked_parser(src_bit);
     }
 }
 
