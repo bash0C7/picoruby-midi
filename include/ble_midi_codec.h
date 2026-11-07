@@ -112,6 +112,54 @@ static inline bool ble_midi_encoder_pending(const ble_midi_encoder_t *e)
 }
 
 /* ---------------------------------------------------------------------
+ * Receive timing: sender timestamps -> local release times
+ *
+ * BLE delivers what was sent during a connection interval together, at the
+ * next connection event, so messages arrive up to an interval (more with
+ * retransmissions) later than they were sent, by a varying amount. The
+ * sender's 13-bit timestamps say when each was sent; this maps them onto the
+ * local clock so that messages can be passed on with the spacing they were
+ * sent with, a constant `budget` later:
+ *
+ *     release = sender time + offset + budget
+ *
+ * offset (local - sender clock) is the smallest delay seen: the message that
+ * went out right before a connection event. It follows a sender clock that
+ * runs faster at once (smaller delays) and one that runs slower by creeping
+ * up 1 ms every BLE_MIDI_SYNC_RELAX_MS. Release times never go backward (the
+ * order stays), never before the arrival and never more than `budget` after
+ * it -- so a sender with no real timestamps costs `budget` of latency and no
+ * reordering. After BLE_MIDI_SYNC_IDLE_MS without messages it starts over.
+ * ------------------------------------------------------------------- */
+
+#define BLE_MIDI_SYNC_RELAX_MS 500
+#define BLE_MIDI_SYNC_IDLE_MS  5000
+
+typedef struct {
+    bool    started;
+    int64_t sender_ms;      /* last sender time, unwrapped (13 bits -> 64) */
+    int64_t offset_us;      /* local (us) - sender (ms * 1000), the smallest seen */
+    int64_t relax_at_ms;    /* local time of the last offset change */
+    int64_t last_ms;        /* local time of the last message */
+    int64_t last_release_us;
+    uint32_t late;          /* arrived later than budget allows (passed at once) */
+} ble_midi_sync_t;
+
+void ble_midi_sync_reset(ble_midi_sync_t *s);
+
+/* Local time (us) to pass on a message with sender timestamp `ts` that
+ * arrived at `now_us`. budget_us <= 0: no correction (now_us). */
+int64_t ble_midi_sync_release(ble_midi_sync_t *s, uint16_t ts,
+                              int64_t now_us, int32_t budget_us);
+
+/* Budget for a connection interval (1.25 ms units): the interval plus a
+ * margin, within [BLE_MIDI_SYNC_BUDGET_MIN_US, BLE_MIDI_SYNC_BUDGET_MAX_US] */
+#define BLE_MIDI_SYNC_MARGIN_US     4000
+#define BLE_MIDI_SYNC_BUDGET_MIN_US 10000
+#define BLE_MIDI_SYNC_BUDGET_MAX_US 60000
+int32_t ble_midi_sync_auto_budget(uint16_t interval_1250us);
+
+/* ---------------------------------------------------------------------
  * USB-MIDI helpers
  * ------------------------------------------------------------------- */
 

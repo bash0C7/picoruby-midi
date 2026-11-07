@@ -322,3 +322,66 @@ bool ble_midi_encode(ble_midi_encoder_t *e, const uint8_t pkt[4], uint16_t ts, u
     }
     return true;
 }
+
+/* ---------------------------------------------------------------------
+ * Receive timing
+ * ------------------------------------------------------------------- */
+
+void ble_midi_sync_reset(ble_midi_sync_t *s)
+{
+    memset(s, 0, sizeof(*s));
+}
+
+int32_t ble_midi_sync_auto_budget(uint16_t interval_1250us)
+{
+    int32_t b = (int32_t)interval_1250us * 1250 + BLE_MIDI_SYNC_MARGIN_US;
+    if (b < BLE_MIDI_SYNC_BUDGET_MIN_US) b = BLE_MIDI_SYNC_BUDGET_MIN_US;
+    if (b > BLE_MIDI_SYNC_BUDGET_MAX_US) b = BLE_MIDI_SYNC_BUDGET_MAX_US;
+    return b;
+}
+
+int64_t ble_midi_sync_release(ble_midi_sync_t *s, uint16_t ts,
+                              int64_t now_us, int32_t budget_us)
+{
+    if (budget_us <= 0) return now_us;
+    int64_t now_ms = now_us / 1000;
+    ts &= BLE_MIDI_TS_MASK;
+
+    if (!s->started || now_ms - s->last_ms > BLE_MIDI_SYNC_IDLE_MS) {
+        uint32_t late = s->late;
+        ble_midi_sync_reset(s);
+        s->late = late;
+        s->started = true;
+        s->sender_ms = ts;
+        s->offset_us = now_us - (int64_t)ts * 1000;
+        s->relax_at_ms = now_ms;
+    } else {
+        /* The 8192 ms candidate nearest the sender time we expect now */
+        int64_t expected = (now_us - s->offset_us) / 1000;
+        int64_t cand = (expected & ~(int64_t)BLE_MIDI_TS_MASK) | ts;
+        if (cand - expected > (BLE_MIDI_TS_MASK + 1) / 2) cand -= BLE_MIDI_TS_MASK + 1;
+        else if (expected - cand > (BLE_MIDI_TS_MASK + 1) / 2) cand += BLE_MIDI_TS_MASK + 1;
+        s->sender_ms = cand;
+
+        while (now_ms - s->relax_at_ms >= BLE_MIDI_SYNC_RELAX_MS) {
+            s->offset_us += 1000;
+            s->relax_at_ms += BLE_MIDI_SYNC_RELAX_MS;
+        }
+        int64_t d = now_us - cand * 1000;
+        if (d < s->offset_us) {
+            s->offset_us = d;
+            s->relax_at_ms = now_ms;
+        }
+    }
+    s->last_ms = now_ms;
+
+    int64_t rel = s->sender_ms * 1000 + s->offset_us + budget_us;
+    if (rel < now_us) {
+        rel = now_us;
+        s->late++;
+    }
+    if (rel > now_us + budget_us) rel = now_us + budget_us;
+    if (rel < s->last_release_us) rel = s->last_release_us;
+    s->last_release_us = rel;
+    return rel;
+}

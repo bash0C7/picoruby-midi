@@ -341,6 +341,109 @@ static void test_cin_helpers(void)
     EXPECT_EQ(BLE_MIDI_CHAR_UUID_LE[0], 0xF3);
 }
 
+/* --- receive timing --------------------------------------------------- */
+
+/* Messages every 10 ms, arriving 50 ms (clock difference) plus a jitter of
+ * 0..14 ms later: released with the spacing they were sent with. */
+static void test_sync_dejitter(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    const int32_t budget = 20000;
+    const int jitter[] = { 0, 7, 14, 3, 11, 0, 9, 13, 2, 5 };
+    int64_t first = 0;
+    for (int i = 0; i < 40; i++) {
+        int64_t sent_ms = 8000 + i * 10;              /* crosses the 8192 wrap */
+        int64_t now = (sent_ms + 50 + jitter[i % 10]) * 1000;
+        int64_t rel = ble_midi_sync_release(&s, (uint16_t)(sent_ms & BLE_MIDI_TS_MASK), now, budget);
+        if (i == 0) first = rel;
+        EXPECT_EQ(rel, first + (int64_t)i * 10000);
+        if (rel < now || rel > now + budget) EXPECT_EQ(rel, now);
+    }
+    EXPECT_EQ(s.late, 0);
+    EXPECT_EQ(s.sender_ms, 8000 + 39 * 10);
+}
+
+/* A smaller delay later lowers the offset; nothing goes backward */
+static void test_sync_offset_drops(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    int64_t r1 = ble_midi_sync_release(&s, 100, (100 + 30) * 1000, 20000);
+    EXPECT_EQ(r1, 150000);
+    int64_t r2 = ble_midi_sync_release(&s, 110, (110 + 20) * 1000, 20000);   /* 10 ms less delay */
+    EXPECT_EQ(r2, 150000);      /* would be 140 ms: kept in order */
+    int64_t r3 = ble_midi_sync_release(&s, 140, (140 + 20) * 1000, 20000);
+    EXPECT_EQ(r3, 180000);
+}
+
+/* Later than the budget allows: passed on at once, counted */
+static void test_sync_late(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    ble_midi_sync_release(&s, 0, 10000, 15000);
+    int64_t now = (10 + 10 + 40) * 1000;                    /* 40 ms more delay */
+    EXPECT_EQ(ble_midi_sync_release(&s, 10, now, 15000), now);
+    EXPECT_EQ(s.late, 1);
+}
+
+/* A sender with no real timestamps: never earlier than the arrival, never
+ * more than the budget after it, in order */
+static void test_sync_constant_timestamp(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    int64_t last = 0;
+    for (int i = 0; i < 300; i++) {
+        int64_t now = 1000000 + (int64_t)i * 37000;
+        int64_t rel = ble_midi_sync_release(&s, 0, now, 20000);
+        if (rel < now || rel > now + 20000 || rel < last) {
+            fprintf(stderr, "FAIL constant ts: i=%d now=%lld rel=%lld last=%lld\n",
+                    i, (long long)now, (long long)rel, (long long)last);
+            exit(1);
+        }
+        last = rel;
+    }
+}
+
+/* A sender clock 0.2 % slower than ours: the offset creeps up after it, and
+ * the releases keep the 10 ms spacing (to the ms of the timestamps) */
+static void test_sync_drift(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    int irregular = 0, late = 0;
+    int64_t prev = 0;
+    for (int i = 0; i < 3000; i++) {                 /* 30 s, every 10 ms */
+        int64_t local_ms = 1000 + (int64_t)i * 10;
+        int64_t sent_ms = local_ms - (local_ms * 2) / 1000;   /* sender slower */
+        int64_t now = (local_ms + 5 + (i % 3) * 4) * 1000;
+        int64_t rel = ble_midi_sync_release(&s, (uint16_t)(sent_ms & BLE_MIDI_TS_MASK), now, 20000);
+        if (rel == now) late++;
+        if (i > 0) {
+            int64_t step = rel - prev;
+            if (step < 8000 || step > 12000) irregular++;
+        }
+        prev = rel;
+    }
+    if (irregular > 30 || late > 0) {
+        fprintf(stderr, "FAIL drift: %d irregular steps, %d late\n", irregular, late);
+        exit(1);
+    }
+}
+
+static void test_sync_off_and_budget(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    EXPECT_EQ(ble_midi_sync_release(&s, 123, 777777, 0), 777777);
+    EXPECT_EQ(ble_midi_sync_auto_budget(6), 11500);       /* 7.5 ms + 4 */
+    EXPECT_EQ(ble_midi_sync_auto_budget(0), 10000);       /* unknown: the minimum */
+    EXPECT_EQ(ble_midi_sync_auto_budget(12), 19000);      /* 15 ms + 4 */
+    EXPECT_EQ(ble_midi_sync_auto_budget(400), 60000);
+}
+
 int main(void)
 {
     test_decode_basic();
@@ -354,6 +457,12 @@ int main(void)
     test_encode_time_jumps();
     test_encode_sysex();
     test_cin_helpers();
+    test_sync_dejitter();
+    test_sync_offset_drops();
+    test_sync_late();
+    test_sync_constant_timestamp();
+    test_sync_drift();
+    test_sync_off_and_budget();
     printf("all BLE-MIDI codec tests passed\n");
     return 0;
 }
