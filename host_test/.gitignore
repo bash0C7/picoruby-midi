@@ -1,3 +1,4 @@
 test_midi_parser
 *.o
 test_midi_route
+test_ble_midi_codec
