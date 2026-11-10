@@ -13,6 +13,7 @@
 struct midi_timed_ring {
     uint8_t (*pkt)[4];
     int64_t *at;
+    int64_t *sent;
     uint32_t mask;
     uint32_t head, tail, cursor;
     bool armed;
@@ -85,7 +86,8 @@ midi_timed_ring_t *midi_timed_ring_new(uint32_t packets, const char *name)
     if (r == NULL) return NULL;
     r->pkt = calloc(n, 4);
     r->at = calloc(n, sizeof(int64_t));
-    if (r->pkt == NULL || r->at == NULL) goto fail;
+    r->sent = calloc(n, sizeof(int64_t));
+    if (r->pkt == NULL || r->at == NULL || r->sent == NULL) goto fail;
     r->mask = n - 1;
     pthread_mutex_init(&r->mux, NULL);
     r->timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, DISPATCH_TIMER_STRICT, ring_queue());
@@ -98,6 +100,7 @@ midi_timed_ring_t *midi_timed_ring_new(uint32_t packets, const char *name)
 fail:
     free(r->pkt);
     free(r->at);
+    free(r->sent);
     free(r);
     return NULL;
 }
@@ -111,10 +114,12 @@ void midi_timed_ring_free(midi_timed_ring_t *r)
     pthread_mutex_destroy(&r->mux);
     free(r->pkt);
     free(r->at);
+    free(r->sent);
     free(r);
 }
 
-bool midi_timed_ring_push(midi_timed_ring_t *r, const uint8_t pkt[4], int64_t at_us)
+bool midi_timed_ring_push_sent(midi_timed_ring_t *r, const uint8_t pkt[4],
+                               int64_t at_us, int64_t sent_us)
 {
     bool ok;
     pthread_mutex_lock(&r->mux);
@@ -123,10 +128,16 @@ bool midi_timed_ring_push(midi_timed_ring_t *r, const uint8_t pkt[4], int64_t at
         uint32_t i = r->head & r->mask;
         memcpy(r->pkt[i], pkt, 4);
         r->at[i] = at_us;
+        r->sent[i] = sent_us;
         r->head++;
     }
     pthread_mutex_unlock(&r->mux);
     return ok;
+}
+
+bool midi_timed_ring_push(midi_timed_ring_t *r, const uint8_t pkt[4], int64_t at_us)
+{
+    return midi_timed_ring_push_sent(r, pkt, at_us, at_us);
 }
 
 void midi_timed_ring_commit(midi_timed_ring_t *r)
@@ -156,7 +167,8 @@ int midi_timed_ring_bytes_due(midi_timed_ring_t *r)
     return (int)(n * 4);
 }
 
-int midi_timed_ring_read(midi_timed_ring_t *r, uint8_t *buf, size_t maxlen)
+int midi_timed_ring_read_sent(midi_timed_ring_t *r, uint8_t *buf, int64_t *sent_us,
+                              size_t maxlen)
 {
     int64_t now = midi_darwin_now_us();
     size_t n = 0;
@@ -164,11 +176,17 @@ int midi_timed_ring_read(midi_timed_ring_t *r, uint8_t *buf, size_t maxlen)
     while (n + 4 <= maxlen && r->tail != r->head
            && r->at[r->tail & r->mask] <= now + DUE_SLACK_US) {
         memcpy(buf + n, r->pkt[r->tail & r->mask], 4);
+        if (sent_us) sent_us[n / 4] = r->sent[r->tail & r->mask];
         r->tail++;
         n += 4;
     }
     pthread_mutex_unlock(&r->mux);
     return (int)n;
+}
+
+int midi_timed_ring_read(midi_timed_ring_t *r, uint8_t *buf, size_t maxlen)
+{
+    return midi_timed_ring_read_sent(r, buf, NULL, maxlen);
 }
 
 uint32_t midi_timed_ring_count(midi_timed_ring_t *r)

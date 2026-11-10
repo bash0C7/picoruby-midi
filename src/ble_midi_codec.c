@@ -385,3 +385,8 @@ int64_t ble_midi_sync_release(ble_midi_sync_t *s, uint16_t ts,
     s->last_release_us = rel;
     return rel;
 }
+
+int64_t ble_midi_sync_sent(const ble_midi_sync_t *s)
+{
+    return s->sender_ms * 1000 + s->offset_us;
+}

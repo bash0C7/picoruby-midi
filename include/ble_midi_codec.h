@@ -152,6 +152,12 @@ void ble_midi_sync_reset(ble_midi_sync_t *s);
 int64_t ble_midi_sync_release(ble_midi_sync_t *s, uint16_t ts,
                               int64_t now_us, int32_t budget_us);
 
+/* Local time (us) the message of the last ble_midi_sync_release (with a
+ * budget) was sent: its sender time plus the offset, without the budget
+ * and the clamps that keep a late one in order. For timing that should
+ * not move with the connection events, like the external clock. */
+int64_t ble_midi_sync_sent(const ble_midi_sync_t *s);
+
 /* Budget for a connection interval (1.25 ms units): the interval plus a
  * margin, within [BLE_MIDI_SYNC_BUDGET_MIN_US, BLE_MIDI_SYNC_BUDGET_MAX_US] */
 #define BLE_MIDI_SYNC_MARGIN_US     4000

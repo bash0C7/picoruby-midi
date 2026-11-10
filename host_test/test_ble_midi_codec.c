@@ -433,6 +433,25 @@ static void test_sync_drift(void)
     }
 }
 
+/* Late messages are released at their arrival, but their sent times keep
+ * the spacing they were sent with */
+static void test_sync_sent(void)
+{
+    ble_midi_sync_t s;
+    ble_midi_sync_reset(&s);
+    const int delay_ms[] = { 5, 30, 12, 40, 8 };
+    int64_t first = 0;
+    for (int i = 0; i < 20; i++) {
+        int64_t sent_ms = 500 + i * 20;
+        int64_t now = (sent_ms + delay_ms[i % 5]) * 1000;
+        ble_midi_sync_release(&s, (uint16_t)sent_ms, now, 10000);
+        if (i == 0) first = ble_midi_sync_sent(&s);
+        EXPECT_EQ(ble_midi_sync_sent(&s), first + (int64_t)i * 20000);
+    }
+    EXPECT_EQ(first, (500 + 5) * 1000);
+    EXPECT_EQ(s.late > 0, 1);
+}
+
 static void test_sync_off_and_budget(void)
 {
     ble_midi_sync_t s;
@@ -462,6 +481,7 @@ int main(void)
     test_sync_late();
     test_sync_constant_timestamp();
     test_sync_drift();
+    test_sync_sent();
     test_sync_off_and_budget();
     printf("all BLE-MIDI codec tests passed\n");
     return 0;

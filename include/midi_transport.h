@@ -52,6 +52,12 @@ typedef struct midi_transport_ops {
 
     /* Stable category identifier; one of MIDI_TRANSPORT_ID_*. */
     uint8_t transport_id;
+
+    /* Like read_bytes, and puts the local time each packet was sent into
+     * sent_us (one per 4 bytes), for a transport that knows it (BLE-MIDI
+     * timestamps). The external clock is measured on these times instead
+     * of when the packets are read. NULL if it does not. Darwin port. */
+    int  (*read_sent)(void *ctx, uint8_t *buf, int64_t *sent_us, size_t maxlen);
 } midi_transport_ops_t;
 
 typedef struct midi_transport {

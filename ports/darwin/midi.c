@@ -344,6 +344,7 @@ static void *midi_input_thread(void *arg)
 {
     (void)arg;
     uint8_t buffer[256];
+    int64_t sent[sizeof(buffer) / 4];
     midi_event_t event;
     pthread_setname_np("midi_input");
 
@@ -355,15 +356,18 @@ static void *midi_input_thread(void *arg)
             const midi_transport_t *t = MIDI_transport_get(bit);
             if (!t) continue;
             while (t->ops->bytes_available(t->ctx) >= 4) {
-                int read_len = t->ops->read_bytes(t->ctx, buffer, sizeof(buffer));
+                bool timed = t->ops->read_sent != NULL;
+                int read_len = timed ? t->ops->read_sent(t->ctx, buffer, sent, sizeof(buffer))
+                                     : t->ops->read_bytes(t->ctx, buffer, sizeof(buffer));
                 if (read_len <= 0) break;
                 midi_parser_t *clock = tracked_parser(bit);
+                int64_t now = midi_darwin_now_us();
                 for (int i = 0; i + 3 < read_len; i += 4) {
                     MIDI_route_packet(bit, buffer[i] & 0x0F,
                                       buffer[i + 1], buffer[i + 2], buffer[i + 3]);
                     if (clock && midi_parser_feed_usb(clock, buffer[i] & 0x0F,
                                                       buffer[i + 1], buffer[i + 2], buffer[i + 3],
-                                                      (uint64_t)midi_darwin_now_us(), &event)
+                                                      (uint64_t)(timed ? sent[i / 4] : now), &event)
                         && event.sysex_data) {
                         free(event.sysex_data);
                     }

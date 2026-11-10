@@ -95,6 +95,51 @@ static void test_packet_source_to_filter(void)
     CHECK(!MIDI_Input_is_running(), "stopped once nothing reads the source");
 }
 
+static midi_timed_ring_t *g_sent_rx;
+
+static int sent_read(void *ctx, uint8_t *buf, size_t maxlen) { (void)ctx; return midi_timed_ring_read(g_sent_rx, buf, maxlen); }
+static int sent_read_sent(void *ctx, uint8_t *buf, int64_t *sent_us, size_t maxlen)
+{
+    (void)ctx;
+    return midi_timed_ring_read_sent(g_sent_rx, buf, sent_us, maxlen);
+}
+static int sent_avail(void *ctx) { (void)ctx; return midi_timed_ring_bytes_due(g_sent_rx); }
+
+static const midi_transport_ops_t sent_ops = {
+    .send_packet = src_send, .read_bytes = sent_read, .bytes_available = sent_avail,
+    .is_connected = src_connected, .transport_id = MIDI_TRANSPORT_ID_BLE,
+    .read_sent = sent_read_sent,
+};
+static const midi_transport_t sent_transport = { .ops = &sent_ops, .ctx = NULL };
+
+/* Clocks that come all at once (one connection event) but were sent 120
+ * BPM apart: the external clock is measured on when they were sent */
+static void test_clock_on_sent_times(void)
+{
+    g_sent_rx = midi_timed_ring_new(64, "test_sent");
+    CHECK(g_sent_rx != NULL, "ring");
+    midi_tmask_t bit = MIDI_transport_register(&sent_transport);
+    CHECK(bit != 0, "registered");
+    MIDI_Input_add_packet_source(bit);
+    MIDI_Input_track_clock(bit);
+    CHECK(MIDI_route_set_filter(bit, MIDI_ROUTE_DST_RUBY, 0xFFFF, MIDI_ROUTE_ALL_CHANNELS,
+                                MIDI_FILTER_OVERFLOW_DROP) == 0, "filter");
+    CHECK(MIDI_route_start_source(bit) == 0, "input thread started");
+
+    int64_t now = midi_darwin_now_us();
+    const uint8_t clock[4] = { 0x0F, 0xF8, 0, 0 };
+    for (int i = 0; i < 48; i++) {
+        CHECK(midi_timed_ring_push_sent(g_sent_rx, clock, now, now - 1000000 + i * 20833), "push");
+    }
+    midi_timed_ring_commit(g_sent_rx);
+    usleep(50000);
+    float bpm = MIDI_Input_get_external_bpm_from(bit);
+    CHECK(bpm > 119.9f && bpm < 120.1f, "120 BPM from the sent times (%f)", bpm);
+
+    MIDI_route_clear_filter(bit, MIDI_ROUTE_DST_ALL);
+    MIDI_Input_stop();
+}
+
 static void test_clock(void)
 {
     MIDI_Clock_set_bpm(300.0f);
@@ -122,6 +167,7 @@ static void test_note_scheduler(void)
 int main(void)
 {
     test_packet_source_to_filter();
+    test_clock_on_sent_times();
     test_clock();
     test_note_scheduler();
     if (failures) {

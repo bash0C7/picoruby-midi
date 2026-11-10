@@ -46,6 +46,14 @@ void midi_timed_ring_clear(midi_timed_ring_t *r);
 int midi_timed_ring_bytes_due(midi_timed_ring_t *r);
 int midi_timed_ring_read(midi_timed_ring_t *r, uint8_t *buf, size_t maxlen);
 
+/* Darwin: a packet with the time it was sent as well (ble_midi_sync_sent;
+ * midi_timed_ring_push gives at_us), and a read that hands those back,
+ * one per packet in sent_us */
+bool midi_timed_ring_push_sent(midi_timed_ring_t *r, const uint8_t pkt[4],
+                               int64_t at_us, int64_t sent_us);
+int midi_timed_ring_read_sent(midi_timed_ring_t *r, uint8_t *buf, int64_t *sent_us,
+                              size_t maxlen);
+
 /* Packets in the ring, due or not */
 uint32_t midi_timed_ring_count(midi_timed_ring_t *r);
 
