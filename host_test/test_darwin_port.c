@@ -82,10 +82,14 @@ static void test_packet_source_to_filter(void)
     CHECK(!MIDI_Filter_pop(&dst, &src, &cin, &b1, &b2, &b3), "queue empty");
 
     g_connected = false;
-    usleep(30000);
-    CHECK(!MIDI_Input_is_running(), "input thread ends without a connected source");
+    const uint8_t off[4] = { 0x08, 0x80, 60, 0 };
+    CHECK(midi_timed_ring_push(g_rx, off, midi_darwin_now_us()), "push while disconnected");
+    midi_timed_ring_commit(g_rx);
+    CHECK(!MIDI_Filter_wait(30), "a disconnected source is not read");
+    CHECK(MIDI_Input_is_running(), "the input thread waits for its source");
     g_connected = true;
-    CHECK(MIDI_route_start_source(bit) == 0, "input thread restarts");
+    CHECK(MIDI_Filter_wait(100) && MIDI_Filter_pop(&dst, &src, &cin, &b1, &b2, &b3) && cin == 0x8,
+          "read again once the source is back");
     MIDI_route_clear_filter(bit, MIDI_ROUTE_DST_ALL);
     MIDI_Input_stop();
     CHECK(!MIDI_Input_is_running(), "stopped once nothing reads the source");

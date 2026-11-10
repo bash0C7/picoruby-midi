@@ -249,7 +249,8 @@ ports:
 - `ports/esp32/midi.c` - ESP32 port: the clock (an esp_timer; a transport
   and route source of its own), FreeRTOS input task
 - `ports/darwin/midi.c` - macOS / iOS port: the clock and the note
-  scheduler on a GCD timer, the input task on a pthread. Darwin has no
+  scheduler on a GCD timer, the input task on a pthread that waits while no
+  source is connected and ends at `MIDI_Input_stop`. Darwin has no
   built-in transports (USB-MIDI host, UART, USB-MIDI device), so the input
   task reads only the packet sources other gems register
   (`MIDI_Input_add_packet_source`), and `MIDI::Input` receives nothing.

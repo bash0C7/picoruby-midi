@@ -17,7 +17,6 @@ struct midi_timed_ring {
     uint32_t head, tail, cursor;
     bool armed;
     pthread_mutex_t mux;
-    dispatch_queue_t queue;
     dispatch_source_t timer;
 };
 
@@ -65,8 +64,21 @@ static void service(midi_timed_ring_t *r, bool from_timer)
     }
 }
 
+static dispatch_queue_t ring_queue(void)
+{
+    static dispatch_once_t once;
+    static dispatch_queue_t q;
+    dispatch_once(&once, ^{
+        dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
+            DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
+        q = dispatch_queue_create("picoruby.midi.ring", attr);
+    });
+    return q;
+}
+
 midi_timed_ring_t *midi_timed_ring_new(uint32_t packets, const char *name)
 {
+    (void)name;
     uint32_t n = 1;
     while (n < packets) n <<= 1;
     midi_timed_ring_t *r = calloc(1, sizeof(*r));
@@ -76,11 +88,7 @@ midi_timed_ring_t *midi_timed_ring_new(uint32_t packets, const char *name)
     if (r->pkt == NULL || r->at == NULL) goto fail;
     r->mask = n - 1;
     pthread_mutex_init(&r->mux, NULL);
-    dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
-        DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-    r->queue = dispatch_queue_create(name ? name : "midi_ring", attr);
-    if (r->queue == NULL) goto fail;
-    r->timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, DISPATCH_TIMER_STRICT, r->queue);
+    r->timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, DISPATCH_TIMER_STRICT, ring_queue());
     if (r->timer == NULL) goto fail;
     dispatch_source_set_event_handler(r->timer, ^{ service(r, true); });
     dispatch_source_set_timer(r->timer, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
@@ -88,7 +96,6 @@ midi_timed_ring_t *midi_timed_ring_new(uint32_t packets, const char *name)
     return r;
 
 fail:
-    if (r->queue) dispatch_release(r->queue);
     free(r->pkt);
     free(r->at);
     free(r);
@@ -99,9 +106,8 @@ void midi_timed_ring_free(midi_timed_ring_t *r)
 {
     if (r == NULL) return;
     dispatch_source_cancel(r->timer);
-    dispatch_sync(r->queue, ^{});
+    dispatch_sync(ring_queue(), ^{});
     dispatch_release(r->timer);
-    dispatch_release(r->queue);
     pthread_mutex_destroy(&r->mux);
     free(r->pkt);
     free(r->at);

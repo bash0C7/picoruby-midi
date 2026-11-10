@@ -23,6 +23,8 @@ int64_t midi_darwin_now_us(void)
     return (int64_t)(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000);
 }
 
+static int g_timer_queue_key;
+
 static dispatch_queue_t timer_queue(void)
 {
     static dispatch_once_t once;
@@ -31,8 +33,19 @@ static dispatch_queue_t timer_queue(void)
         dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
             DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
         q = dispatch_queue_create("picoruby.midi.timer", attr);
+        dispatch_queue_set_specific(q, &g_timer_queue_key, &g_timer_queue_key, NULL);
     });
     return q;
+}
+
+static void on_timer_queue(dispatch_block_t block)
+{
+    dispatch_queue_t q = timer_queue();
+    if (dispatch_get_specific(&g_timer_queue_key) == &g_timer_queue_key) {
+        block();
+    } else {
+        dispatch_sync(q, block);
+    }
 }
 
 static midi_stop_check_fn g_stop_check_fn = NULL;
@@ -158,14 +171,16 @@ int MIDI_Clock_init(void)
 
 void MIDI_Clock_deinit(void)
 {
-    if (g_clock_timer != NULL) {
-        dispatch_source_cancel(g_clock_timer);
-        dispatch_release(g_clock_timer);
-        g_clock_timer = NULL;
-    }
-    g_clock_period_us = 0;
-    g_clock_next_period_us = 0;
-    g_clock_running = false;
+    on_timer_queue(^{
+        if (g_clock_timer != NULL) {
+            dispatch_source_cancel(g_clock_timer);
+            dispatch_release(g_clock_timer);
+            g_clock_timer = NULL;
+        }
+        g_clock_period_us = 0;
+        g_clock_next_period_us = 0;
+        g_clock_running = false;
+    });
 }
 
 midi_tmask_t MIDI_Clock_bit(void)
@@ -200,7 +215,7 @@ void MIDI_Clock_start(void)
     if (MIDI_Clock_init() != 0) return;
     g_clock_running = true;
     clock_send(MIDI_STATUS_START);
-    dispatch_sync(timer_queue(), ^{
+    on_timer_queue(^{
         uint32_t next = __atomic_exchange_n(&g_clock_next_period_us, 0, __ATOMIC_RELAXED);
         if (next) g_clock_period_us = next;
         clock_arm(g_clock_period_us);
@@ -335,8 +350,6 @@ static void *midi_input_thread(void *arg)
     while (g_input_running) {
         if (midi_stop_requested()) break;
         midi_tmask_t packet_sources = packet_sources_wanted();
-        if (!packet_sources) break;
-
         for (midi_tmask_t bit = 1; bit; bit <<= 1) {
             if (!(packet_sources & bit)) continue;
             const midi_transport_t *t = MIDI_transport_get(bit);
@@ -592,7 +605,7 @@ void MIDI_Note_scheduler_deinit(void)
         dispatch_release(g_note_scheduler_timer);
         g_note_scheduler_timer = NULL;
     }
-    dispatch_sync(timer_queue(), ^{ midi_scheduler_core_deinit(); });
+    on_timer_queue(^{ midi_scheduler_core_deinit(); });
 }
 
 int MIDI_Note_trigger(midi_tmask_t transport_mask, uint8_t channel, uint8_t note,
@@ -600,7 +613,7 @@ int MIDI_Note_trigger(midi_tmask_t transport_mask, uint8_t channel, uint8_t note
 {
     if (g_note_scheduler_timer == NULL && MIDI_Note_scheduler_init() != 0) return -1;
     __block int ret = 0;
-    dispatch_sync(timer_queue(), ^{
+    on_timer_queue(^{
         ret = midi_scheduler_trigger(transport_mask, channel, note, velocity,
                                      duration_ms, (uint64_t)midi_darwin_now_us());
     });
@@ -609,5 +622,5 @@ int MIDI_Note_trigger(midi_tmask_t transport_mask, uint8_t channel, uint8_t note
 
 void MIDI_Note_scheduler_clear(void)
 {
-    dispatch_sync(timer_queue(), ^{ midi_scheduler_clear(); });
+    on_timer_queue(^{ midi_scheduler_clear(); });
 }
