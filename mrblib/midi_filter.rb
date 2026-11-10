@@ -369,6 +369,21 @@ module MIDI
       _reset_external_clock_from(from.is_a?(Integer) ? from : route_bit(from))
     end
 
+    # Where the external clock arriving on `from` is in the song, to play
+    # in time with it: [tick, age_us, period_us] -- the position of the
+    # last clock (24 a quarter note from Start; Song Position Pointer and
+    # Continue carry on from elsewhere), how many microseconds ago it came
+    # (when it was sent, for BLE-MIDI) and the microseconds between clocks
+    # (0.0 until known). nil while the clock is stopped or before the first
+    # clock after Start / Continue.
+    #
+    #   tick, age, period = MIDI.external_clock(device)
+    #   # the next sixteenth note (6 clocks) is due in
+    #   # (6 - tick % 6) * period - age microseconds
+    def external_clock(from)
+      _external_clock_from(from.is_a?(Integer) ? from : route_bit(from))
+    end
+
     # @return [Hash] overflows: messages the queue had no room for
     def filter_stats
       { overflows: _filter_overflows }

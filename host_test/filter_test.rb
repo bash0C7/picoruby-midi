@@ -234,6 +234,8 @@ check "external bpm via source", 120.0, MIDI::ClockSource.new(HOST).external_bpm
 check "watches add up", 0x03, $stub[:watch]
 MIDI::ClockSource.new(AMY)                            # not a source: no watch
 check "non-source not watched", 0x03, $stub[:watch]
+check "external clock by source bit", [0x01, 12, 34, 20833.0], MIDI.external_clock(0x01)
+check "external clock by transport", [0x02, 12, 34, 20833.0], MIDI.external_clock(UART)
 
 # --- NoteMap ---------------------------------------------------------------------
 

@@ -214,6 +214,13 @@ void MIDI_Input_reset_external_clock(void);
 float MIDI_Input_get_external_bpm_from(midi_tmask_t src_bit);
 void MIDI_Input_reset_external_clock_from(midi_tmask_t src_bit);
 
+/* Song position of the external clock on `src_bit` (midi_parser_get_external_clock):
+ * the position of the last clock (24 a quarter note), how long ago it came
+ * (us) and the period between clocks (us; 0.0 until known). false while
+ * that clock is stopped or no clock has come since Start / Continue. */
+bool MIDI_Input_get_external_clock_from(midi_tmask_t src_bit, int32_t *tick,
+                                        int32_t *age_us, float *period_us);
+
 /*
  * Filter queue (MIDI.filter / MIDI.on)
  *

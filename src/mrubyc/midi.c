@@ -793,6 +793,26 @@ c_midi_reset_external_clock_from(mrbc_vm *vm, mrbc_value v[], int argc)
     SET_NIL_RETURN();
 }
 
+static void
+c_midi_external_clock_from(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    int32_t tick, age_us;
+    float period_us;
+    if (argc < 1 || !MIDI_Input_get_external_clock_from((midi_tmask_t)GET_INT_ARG(1),
+                                                        &tick, &age_us, &period_us)) {
+        SET_NIL_RETURN();
+        return;
+    }
+    mrbc_value arr = mrbc_array_new(vm, 3);
+    mrbc_value tick_val = mrbc_integer_value(tick);
+    mrbc_value age_val = mrbc_integer_value(age_us);
+    mrbc_value period_val = mrbc_float_value(vm, period_us);
+    mrbc_array_set(&arr, 0, &tick_val);
+    mrbc_array_set(&arr, 1, &age_val);
+    mrbc_array_set(&arr, 2, &period_val);
+    SET_RETURN(arr);
+}
+
 /*
  * Gem initialization
  */
@@ -833,6 +853,7 @@ mrbc_midi_init(mrbc_vm *vm)
     mrbc_define_method(vm, module_MIDI, "_filter_overflows", c_midi_filter_overflows);
     mrbc_define_method(vm, module_MIDI, "_external_bpm_from", c_midi_external_bpm_from);
     mrbc_define_method(vm, module_MIDI, "_reset_external_clock_from", c_midi_reset_external_clock_from);
+    mrbc_define_method(vm, module_MIDI, "_external_clock_from", c_midi_external_clock_from);
 
     /* Define Clock class under MIDI */
     mrbc_class *class_Clock = mrbc_define_class_under(vm, module_MIDI, "Clock", mrbc_class_object);

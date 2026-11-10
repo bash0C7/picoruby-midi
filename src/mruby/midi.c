@@ -365,6 +365,24 @@ mrb_midi_reset_external_clock_from(mrb_state *mrb, mrb_value self)
     return mrb_nil_value();
 }
 
+/* MIDI._external_clock_from(src_bit) -> [tick, age_us, period_us] or nil */
+static mrb_value
+mrb_midi_external_clock_from(mrb_state *mrb, mrb_value self)
+{
+    mrb_int src;
+    int32_t tick, age_us;
+    float period_us;
+    mrb_get_args(mrb, "i", &src);
+    if (!MIDI_Input_get_external_clock_from((midi_tmask_t)src, &tick, &age_us, &period_us)) {
+        return mrb_nil_value();
+    }
+    mrb_value a = mrb_ary_new_capa(mrb, 3);
+    mrb_ary_push(mrb, a, mrb_fixnum_value(tick));
+    mrb_ary_push(mrb, a, mrb_fixnum_value(age_us));
+    mrb_ary_push(mrb, a, mrb_float_value(mrb, (mrb_float)period_us));
+    return a;
+}
+
 static mrb_value
 mrb_midi_input_task_running(mrb_state *mrb, mrb_value self)
 {
@@ -721,6 +739,8 @@ mrb_picoruby_midi_gem_init(mrb_state *mrb)
                                   mrb_midi_external_bpm_from, MRB_ARGS_REQ(1));
     mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_reset_external_clock_from),
                                   mrb_midi_reset_external_clock_from, MRB_ARGS_REQ(1));
+    mrb_define_module_function_id(mrb, module_MIDI, MRB_SYM(_external_clock_from),
+                                  mrb_midi_external_clock_from, MRB_ARGS_REQ(1));
 
     /* MIDI::Clock */
     class_Clock = mrb_define_class_under_id(mrb, module_MIDI, MRB_SYM(Clock),

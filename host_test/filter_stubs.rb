@@ -69,5 +69,6 @@ module MIDI
     def _filter_overflows; 0; end
     def _external_bpm_from(src); 120.0; end
     def _reset_external_clock_from(src); end
+    def _external_clock_from(src); [src, 12, 34, 20833.0]; end
   end
 end

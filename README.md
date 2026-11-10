@@ -155,6 +155,11 @@ MIDI.on_bpm_change { |new_bpm| puts "BPM is now #{new_bpm}" }
   Listeners. `:any` is every channel message; realtime types only when named.
 - `MIDI.external_bpm(from)` / `MIDI.reset_external_clock(from)` - Tempo of the
   clock arriving on a source (USB host, UART, USB device).
+- `MIDI.external_clock(from)` - `[tick, age_us, period_us]`: where that clock
+  is in the song (the position of its last clock, 24 a quarter note, moved by
+  Start, Continue, Stop and Song Position Pointer), how long ago that clock
+  came (when it was sent, for BLE-MIDI on Darwin) and the period between
+  clocks; `nil` while it is stopped. To play in time with it.
 - `MIDI.run_filters(max = 64)` - Run queued filter work (for loops of your own).
 - `MIDI.filter_stats` - `{ overflows: }`.
 - `MIDI.bpm_loop(bpm = nil, output:, ...)` - Legacy version of `start!`.

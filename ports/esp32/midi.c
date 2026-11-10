@@ -1145,6 +1145,19 @@ void MIDI_Input_reset_external_clock_from(midi_tmask_t src_bit)
     if (p) midi_parser_reset_external_clock(p);
 }
 
+bool MIDI_Input_get_external_clock_from(midi_tmask_t src_bit, int32_t *tick,
+                                        int32_t *age_us, float *period_us)
+{
+    midi_parser_clock_t c;
+    if (!midi_parser_get_external_clock(parser_for(src_bit), &c) || !c.running || c.tick < 0) {
+        return false;
+    }
+    *tick = c.tick;
+    *age_us = (int32_t)(esp_timer_get_time() - c.at_us);
+    *period_us = c.period_us;
+    return true;
+}
+
 /* ========================================
  * Filter queue (MIDI.filter / MIDI.on)
  * ======================================== */
