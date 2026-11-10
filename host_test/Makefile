@@ -18,6 +18,12 @@ ROUTE_BIN = test_midi_route
 BLE_SRC = ../src/ble_midi_codec.c test_ble_midi_codec.c
 BLE_BIN = test_ble_midi_codec
 
+DARWIN_CFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -std=gnu11 -I.. -I../ports/darwin/include
+DARWIN_SRC = ../src/midi_transport_registry.c ../src/midi_route.c ../src/midi_parser.c \
+             ../src/midi_scheduler.c ../src/midi_clock_gen.c \
+             ../ports/darwin/midi.c ../ports/darwin/midi_timed_ring.c test_darwin_port.c
+DARWIN_BIN = test_darwin_port
+
 all: run
 
 $(BIN): $(SRC)
@@ -29,12 +35,18 @@ $(ROUTE_BIN): $(ROUTE_SRC)
 $(BLE_BIN): $(BLE_SRC)
 	$(CC) $(CFLAGS) -o $@ $(BLE_SRC) $(LDFLAGS)
 
+$(DARWIN_BIN): $(DARWIN_SRC)
+	$(CC) $(DARWIN_CFLAGS) -o $@ $(DARWIN_SRC) $(LDFLAGS)
+
 run: $(BIN) $(ROUTE_BIN) $(BLE_BIN)
 	./$(BIN)
 	./$(ROUTE_BIN)
 	./$(BLE_BIN)
 
-clean:
-	rm -f $(BIN) $(ROUTE_BIN) $(BLE_BIN)
+darwin: $(DARWIN_BIN)
+	./$(DARWIN_BIN)
 
-.PHONY: all run clean
+clean:
+	rm -f $(BIN) $(ROUTE_BIN) $(BLE_BIN) $(DARWIN_BIN)
+
+.PHONY: all run darwin clean
