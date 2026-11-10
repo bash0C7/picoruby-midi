@@ -57,6 +57,23 @@ bool midi_parser_feed_usb(midi_parser_t *p, uint8_t cin,
 /* Latest external BPM estimate. 0.0 until enough samples are collected. */
 float midi_parser_get_external_bpm(const midi_parser_t *p);
 
+/* Where the external clock is in the song. Start (position 0), Continue
+ * and Stop run and halt it, Song Position Pointer moves it, and each clock
+ * while it runs takes the next position. */
+typedef struct {
+    bool    running;    /* between Start / Continue and Stop */
+    int32_t tick;       /* position of the last clock, in clocks (24 a
+                         * quarter note); -1 until a clock comes after
+                         * Start / Continue */
+    int64_t at_us;      /* when that clock came, on the now_us clock,
+                         * fitted over the recent clocks */
+    float   period_us;  /* microseconds between clocks; 0.0 until known */
+} midi_parser_clock_t;
+
+/* The song position of the external clock (any thread). false until a
+ * clock has come. */
+bool midi_parser_get_external_clock(const midi_parser_t *p, midi_parser_clock_t *out);
+
 /* Reset only the external BPM tracker (e.g. on MIDI Start). */
 void midi_parser_reset_external_clock(midi_parser_t *p);
 

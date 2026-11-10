@@ -424,6 +424,116 @@ TEST(test_external_bpm_reset)
     midi_parser_free(p);
 }
 
+/* ---------- External clock position ---------- */
+
+static midi_parser_clock_t clock_of(midi_parser_t *p)
+{
+    midi_parser_clock_t c;
+    EXPECT_TRUE(midi_parser_get_external_clock(p, &c));
+    return c;
+}
+
+TEST(test_external_clock_position)
+{
+    midi_parser_t *p = midi_parser_new(MIDI_SOURCE_USB);
+    midi_event_t ev;
+    midi_parser_clock_t c;
+    EXPECT_TRUE(!midi_parser_get_external_clock(p, &c));
+
+    midi_parser_feed_raw(p, 0xF8, 1000, &ev);
+    c = clock_of(p);
+    EXPECT_TRUE(!c.running);
+    EXPECT_EQ(c.tick, -1);
+
+    EXPECT_TRUE(midi_parser_feed_raw(p, 0xFA, 2000, &ev));
+    EXPECT_EQ(ev.type, MIDI_EVENT_START);
+    c = clock_of(p);
+    EXPECT_TRUE(c.running);
+    EXPECT_EQ(c.tick, -1);
+
+    midi_parser_feed_raw(p, 0xF8, 3000, &ev);
+    midi_parser_feed_raw(p, 0xF8, 4000, &ev);
+    c = clock_of(p);
+    EXPECT_EQ(c.tick, 1);
+    EXPECT_EQ(c.at_us, 4000);
+
+    midi_parser_feed_raw(p, 0xFC, 5000, &ev);
+    midi_parser_feed_raw(p, 0xF8, 6000, &ev);
+    c = clock_of(p);
+    EXPECT_TRUE(!c.running);
+    EXPECT_EQ(c.tick, 1);
+
+    midi_parser_feed_raw(p, 0xFB, 7000, &ev);
+    midi_parser_feed_raw(p, 0xF8, 8000, &ev);
+    EXPECT_EQ(clock_of(p).tick, 2);
+    midi_parser_free(p);
+}
+
+TEST(test_external_clock_song_position_pointer)
+{
+    midi_parser_t *p = midi_parser_new(MIDI_SOURCE_USB);
+    midi_event_t ev;
+    /* 0x81 sixteenths = (1 << 7) | 1: 129 * 6 clocks */
+    EXPECT_TRUE(!midi_parser_feed_raw(p, 0xF2, 0, &ev));
+    EXPECT_TRUE(!midi_parser_feed_raw(p, 0x01, 0, &ev));
+    EXPECT_TRUE(!midi_parser_feed_raw(p, 0x01, 0, &ev));
+    /* No running status after System Common */
+    EXPECT_TRUE(!midi_parser_feed_raw(p, 0x05, 0, &ev));
+    EXPECT_TRUE(!midi_parser_feed_raw(p, 0x00, 0, &ev));
+    midi_parser_feed_raw(p, 0xFB, 0, &ev);
+    midi_parser_feed_raw(p, 0xF8, 100, &ev);
+    EXPECT_EQ(clock_of(p).tick, 129 * 6);
+
+    midi_parser_feed_raw(p, 0xFC, 200, &ev);
+    EXPECT_TRUE(!midi_parser_feed_usb(p, 0x03, 0xF2, 0x10, 0x00, 300, &ev));
+    midi_parser_feed_usb(p, 0x0F, 0xFB, 0, 0, 400, &ev);
+    midi_parser_feed_usb(p, 0x0F, 0xF8, 0, 0, 500, &ev);
+    EXPECT_EQ(clock_of(p).tick, 16 * 6);
+
+    midi_parser_feed_usb(p, 0x0F, 0xFA, 0, 0, 600, &ev);
+    midi_parser_feed_usb(p, 0x0F, 0xF8, 0, 0, 700, &ev);
+    EXPECT_EQ(clock_of(p).tick, 0);
+    midi_parser_free(p);
+}
+
+/* Stamps off by up to +-1 ms (a 1 ms timestamp, a late read): the fitted
+ * time of the newest clock stays near where it should be, the period near
+ * the real one, and the period carries over a Start. */
+TEST(test_external_clock_fitted_time)
+{
+    midi_parser_t *p = midi_parser_new(MIDI_SOURCE_USB);
+    midi_event_t ev;
+    const double period_us = 60000000.0 / (132.0 * 24.0);
+    const int jitter[] = { 0, 900, -700, 400, -1000, 600, -200, 1000 };
+    midi_parser_feed_raw(p, 0xFA, 0, &ev);
+    int worst = 0;
+    for (int i = 0; i < 24 * 8; i++) {
+        int64_t real = 1000000 + (int64_t)(i * period_us);
+        midi_parser_feed_raw(p, 0xF8, (uint64_t)(real + jitter[i % 8]), &ev);
+        if (i < 48) continue;
+        midi_parser_clock_t c = clock_of(p);
+        EXPECT_EQ(c.tick, i);
+        int off = (int)(c.at_us - real);
+        if (off < 0) off = -off;
+        if (off > worst) worst = off;
+        EXPECT_TRUE(c.period_us > period_us - 20 && c.period_us < period_us + 20);
+    }
+    EXPECT_TRUE(worst < 400);
+
+    midi_parser_feed_raw(p, 0xFA, 9000000, &ev);
+    midi_parser_feed_raw(p, 0xF8, 9000100, &ev);
+    midi_parser_clock_t c = clock_of(p);
+    EXPECT_EQ(c.tick, 0);
+    EXPECT_EQ(c.at_us, 9000100);
+    EXPECT_TRUE(c.period_us > period_us - 20 && c.period_us < period_us + 20);
+
+    midi_parser_reset_external_clock(p);
+    EXPECT_EQ((int)clock_of(p).period_us, 0);
+    midi_parser_reset(p);
+    EXPECT_TRUE(!midi_parser_get_external_clock(p, &c));
+    midi_parser_free(p);
+}
+
 /* ---------- Reset ---------- */
 
 TEST(test_reset_clears_running_status)
@@ -473,6 +583,9 @@ int main(void)
     run_test_external_bpm_120();
     run_test_external_bpm_quantized();
     run_test_external_bpm_reset();
+    run_test_external_clock_position();
+    run_test_external_clock_song_position_pointer();
+    run_test_external_clock_fitted_time();
     run_test_reset_clears_running_status();
 
     printf("\n%d/%d passed\n", g_pass_count, g_test_count);

@@ -35,7 +35,26 @@ struct midi_parser {
     volatile int clock_timestamp_index;
     volatile int clock_timestamp_count;
     volatile float external_bpm;
+
+    /* Song position (midi_parser_get_external_clock). The feed writes
+     * `clock` and `clock_seen` as one: clock_seq is odd while it does, and
+     * a reader that saw it change reads again. */
+    uint32_t clock_seq;
+    bool clock_seen;
+    midi_parser_clock_t clock;
+    int32_t clock_next;
 };
+
+static void clock_write_begin(midi_parser_t *p)
+{
+    __atomic_store_n(&p->clock_seq, p->clock_seq + 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+}
+
+static void clock_write_end(midi_parser_t *p)
+{
+    __atomic_store_n(&p->clock_seq, p->clock_seq + 1, __ATOMIC_RELEASE);
+}
 
 static void sysex_reset(midi_parser_t *p)
 {
@@ -131,19 +150,72 @@ static void track_external_clock(midi_parser_t *p, uint64_t now_us)
      * With x = 0..n-1 and y = t - t0:
      *   slope = sum((2x - (n-1)) * y) * 6 / (n * (n^2 - 1)) */
     int n = p->clock_timestamp_count;
+    int64_t at = (int64_t)now_us;
+    float period = p->clock.period_us;
     if (n >= MIDI_EXTERNAL_CLOCK_MIN_SAMPLES) {
         int oldest_idx = n < MIDI_EXTERNAL_CLOCK_SAMPLES ? 0 : p->clock_timestamp_index;
         int64_t t0 = p->clock_timestamps[oldest_idx];
         int64_t num = 0;
+        int64_t sum = 0;
         for (int x = 0; x < n; x++) {
             int64_t y = p->clock_timestamps[(oldest_idx + x) % MIDI_EXTERNAL_CLOCK_SAMPLES] - t0;
             num += (int64_t)(2 * x - (n - 1)) * y;
+            sum += y;
         }
         if (num > 0) {
             float avg = (float)(num * 6) / ((float)n * (float)(n * n - 1));
             p->external_bpm = 60000000.0f / (avg * (float)MIDI_PPQ);
+            period = avg;
+            /* The fitted line at the newest clock: mean + slope * (n-1)/2 */
+            at = t0 + (sum + (int64_t)((double)avg * n * (n - 1) / 2.0)) / n;
         }
     }
+
+    clock_write_begin(p);
+    if (p->clock.running) p->clock.tick = p->clock_next++;
+    p->clock.at_us = at;
+    p->clock.period_us = period;
+    p->clock_seen = true;
+    clock_write_end(p);
+}
+
+/* Start (from position 0) and Continue (from where Stop or Song Position
+ * Pointer left it). The clocks before may be on another grid (a sender
+ * restarts its clock with Start), so the fit starts over; the period
+ * stays until the new clocks give one. */
+static void clock_run(midi_parser_t *p, bool from_start)
+{
+    p->clock_timestamp_index = 0;
+    p->clock_timestamp_count = 0;
+    if (from_start) p->clock_next = 0;
+    clock_write_begin(p);
+    p->clock.running = true;
+    p->clock.tick = -1;
+    clock_write_end(p);
+}
+
+static void clock_halt(midi_parser_t *p)
+{
+    clock_write_begin(p);
+    p->clock.running = false;
+    clock_write_end(p);
+}
+
+/* Song Position Pointer: sixteenth notes from the start, 6 clocks each */
+static void clock_locate(midi_parser_t *p, uint8_t lsb, uint8_t msb)
+{
+    p->clock_next = (int32_t)(((msb & 0x7F) << 7) | (lsb & 0x7F)) * (MIDI_PPQ / 4);
+}
+
+static void clock_reset_position(midi_parser_t *p)
+{
+    p->clock_next = 0;
+    clock_write_begin(p);
+    p->clock.running = false;
+    p->clock.tick = -1;
+    p->clock.at_us = 0;
+    p->clock_seen = false;
+    clock_write_end(p);
 }
 
 midi_parser_t *midi_parser_new(midi_event_source_t source)
@@ -151,6 +223,7 @@ midi_parser_t *midi_parser_new(midi_event_source_t source)
     midi_parser_t *p = (midi_parser_t *)calloc(1, sizeof(midi_parser_t));
     if (!p) return NULL;
     p->source = source;
+    p->clock.tick = -1;
     return p;
 }
 
@@ -169,6 +242,7 @@ void midi_parser_reset(midi_parser_t *p)
     p->expected_bytes = 0;
     sysex_reset(p);
     midi_parser_reset_external_clock(p);
+    clock_reset_position(p);
 }
 
 void midi_parser_reset_external_clock(midi_parser_t *p)
@@ -177,11 +251,30 @@ void midi_parser_reset_external_clock(midi_parser_t *p)
     p->clock_timestamp_index = 0;
     p->clock_timestamp_count = 0;
     p->external_bpm = 0.0f;
+    clock_write_begin(p);
+    p->clock.period_us = 0.0f;
+    clock_write_end(p);
 }
 
 float midi_parser_get_external_bpm(const midi_parser_t *p)
 {
     return p ? p->external_bpm : 0.0f;
+}
+
+bool midi_parser_get_external_clock(const midi_parser_t *p, midi_parser_clock_t *out)
+{
+    if (!p || !out) return false;
+    midi_parser_t *q = (midi_parser_t *)p;
+    uint32_t before, after;
+    bool seen;
+    do {
+        before = __atomic_load_n(&q->clock_seq, __ATOMIC_ACQUIRE);
+        *out = q->clock;
+        seen = q->clock_seen;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        after = __atomic_load_n(&q->clock_seq, __ATOMIC_RELAXED);
+    } while ((before & 1) || before != after);
+    return seen;
 }
 
 bool midi_parser_feed_raw(midi_parser_t *p, uint8_t byte, uint64_t now_us,
@@ -204,9 +297,9 @@ bool midi_parser_feed_raw(midi_parser_t *p, uint8_t byte, uint64_t now_us,
             case 0xF8:
                 track_external_clock(p, now_us);
                 return false;  /* clock not queued */
-            case 0xFA: out->type = MIDI_EVENT_START;        return true;
-            case 0xFC: out->type = MIDI_EVENT_STOP;         return true;
-            case 0xFB: out->type = MIDI_EVENT_CONTINUE;     return true;
+            case 0xFA: clock_run(p, true);  out->type = MIDI_EVENT_START;    return true;
+            case 0xFC: clock_halt(p);       out->type = MIDI_EVENT_STOP;     return true;
+            case 0xFB: clock_run(p, false); out->type = MIDI_EVENT_CONTINUE; return true;
             case 0xFE: return false;  /* Active Sensing - drop */
             case 0xFF: out->type = MIDI_EVENT_SYSTEM_RESET; return true;
             default:   return false;
@@ -299,6 +392,9 @@ bool midi_parser_feed_raw(midi_parser_t *p, uint8_t byte, uint64_t now_us,
             out->type = MIDI_EVENT_CHANNEL_PRESSURE;
             return true;
         default:
+            /* System Common clears running status */
+            if (status == 0xF2) clock_locate(p, d1, d2);
+            p->last_status = 0;
             return false;
     }
 }
@@ -373,14 +469,18 @@ bool midi_parser_feed_usb(midi_parser_t *p, uint8_t cin,
             out->type = MIDI_EVENT_CHANNEL_PRESSURE;
             return true;
 
+        case 0x03:  /* System Common, 3 bytes */
+            if (b1 == 0xF2) clock_locate(p, b2, b3);
+            return false;
+
         case 0x0F:  /* Single-byte Real-time / System */
             switch (b1) {
                 case 0xF8:
                     track_external_clock(p, now_us);
                     return false;
-                case 0xFA: out->type = MIDI_EVENT_START;        return true;
-                case 0xFC: out->type = MIDI_EVENT_STOP;         return true;
-                case 0xFB: out->type = MIDI_EVENT_CONTINUE;     return true;
+                case 0xFA: clock_run(p, true);  out->type = MIDI_EVENT_START;    return true;
+                case 0xFC: clock_halt(p);       out->type = MIDI_EVENT_STOP;     return true;
+                case 0xFB: clock_run(p, false); out->type = MIDI_EVENT_CONTINUE; return true;
                 case 0xFE: return false;  /* Active Sensing - drop */
                 case 0xFF: out->type = MIDI_EVENT_SYSTEM_RESET; return true;
             }
