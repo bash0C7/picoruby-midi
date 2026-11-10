@@ -69,6 +69,23 @@ static volatile bool g_clock_running;
 static volatile uint32_t g_clock_count;
 static volatile uint32_t g_clock_last_tick_us;
 static midi_clock_callback_t g_clock_user_cb;
+/* Song position (MIDI_Clock_position): g_clock_count at Start, moved on by
+ * the ticks a Stop held. The tick and Start write it with the count and
+ * the tick time under g_clock_seq (odd meanwhile). */
+static volatile uint32_t g_clock_seq;
+static volatile uint32_t g_clock_song_start;
+static volatile uint32_t g_clock_stopped_at;
+
+static void clock_position_begin(void)
+{
+    __atomic_store_n(&g_clock_seq, g_clock_seq + 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+}
+
+static void clock_position_end(void)
+{
+    __atomic_store_n(&g_clock_seq, g_clock_seq + 1, __ATOMIC_RELEASE);
+}
 
 static int clock_tx_send_packet(void *ctx, uint8_t cable, uint8_t cin,
                                 uint8_t b1, uint8_t b2, uint8_t b3)
@@ -125,8 +142,10 @@ static void clock_arm(uint64_t period_us)
 
 static void clock_tick(void)
 {
+    clock_position_begin();
     g_clock_last_tick_us = (uint32_t)midi_darwin_now_us();
     g_clock_count++;
+    clock_position_end();
     uint32_t next = __atomic_exchange_n(&g_clock_next_period_us, 0, __ATOMIC_RELAXED);
     if (next) {
         g_clock_period_us = next;
@@ -226,13 +245,21 @@ void MIDI_Clock_start(void)
         /* The clock right after Start is the first beat: receivers start
          * on it, so it goes now rather than a period later */
         clock_arm_after(0, g_clock_period_us);
+        clock_position_begin();
         g_clock_last_tick_us = (uint32_t)midi_darwin_now_us();
+        g_clock_song_start = g_clock_count;
+        clock_position_end();
     });
 }
 
 void MIDI_Clock_continue(void)
 {
     if (MIDI_Clock_init() != 0) return;
+    on_timer_queue(^{
+        clock_position_begin();
+        g_clock_song_start += g_clock_count - g_clock_stopped_at;
+        clock_position_end();
+    });
     g_clock_running = true;
     clock_send(MIDI_STATUS_CONTINUE);
 }
@@ -240,7 +267,28 @@ void MIDI_Clock_continue(void)
 void MIDI_Clock_stop(void)
 {
     g_clock_running = false;
+    if (g_clock_timer != NULL) on_timer_queue(^{ g_clock_stopped_at = g_clock_count; });
     clock_send(MIDI_STATUS_STOP);
+}
+
+bool MIDI_Clock_position(int32_t *tick, int32_t *age_us, float *period_us)
+{
+    if (g_clock_timer == NULL || !g_clock_running) return false;
+    uint32_t before, after, count, start, last;
+    do {
+        before = __atomic_load_n(&g_clock_seq, __ATOMIC_ACQUIRE);
+        count = g_clock_count;
+        start = g_clock_song_start;
+        last = g_clock_last_tick_us;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        after = __atomic_load_n(&g_clock_seq, __ATOMIC_RELAXED);
+    } while ((before & 1) || before != after);
+    int32_t position = (int32_t)(count - start) - 1;
+    if (position < 0) return false;
+    *tick = position;
+    *age_us = (int32_t)((uint32_t)midi_darwin_now_us() - last);
+    *period_us = (float)g_clock_period_us;
+    return true;
 }
 
 void MIDI_Clock_reset(void)

@@ -213,6 +213,8 @@ static volatile bool g_clock_running;         /* Between Start and Stop */
 static volatile uint32_t g_clock_count;       /* Ticks since init */
 static volatile uint32_t g_clock_last_tick_us; /* Low 32 bits of the last tick's time */
 static midi_clock_callback_t g_clock_user_cb;
+static volatile uint32_t g_clock_song_start;  /* g_clock_count at Start, moved on by a Stop's ticks */
+static volatile uint32_t g_clock_stopped_at;  /* g_clock_count at Stop */
 
 static int clock_tx_send_packet(void *ctx, uint8_t cable, uint8_t cin,
                                 uint8_t b1, uint8_t b2, uint8_t b3)
@@ -382,11 +384,13 @@ void MIDI_Clock_start(void)
     if (next) g_clock_period_us = next;
     esp_timer_restart(g_clock_timer, g_clock_period_us);
     g_clock_last_tick_us = (uint32_t)esp_timer_get_time();
+    g_clock_song_start = g_clock_count;
 }
 
 void MIDI_Clock_continue(void)
 {
     if (MIDI_Clock_init() != 0) return;
+    g_clock_song_start += g_clock_count - g_clock_stopped_at;
     g_clock_running = true;
     clock_send(MIDI_STATUS_CONTINUE);
 }
@@ -394,7 +398,19 @@ void MIDI_Clock_continue(void)
 void MIDI_Clock_stop(void)
 {
     g_clock_running = false;
+    g_clock_stopped_at = g_clock_count;
     clock_send(MIDI_STATUS_STOP);
+}
+
+bool MIDI_Clock_position(int32_t *tick, int32_t *age_us, float *period_us)
+{
+    if (g_clock_timer == NULL || !g_clock_running) return false;
+    int32_t position = (int32_t)(g_clock_count - g_clock_song_start) - 1;
+    if (position < 0) return false;
+    *tick = position;
+    *age_us = (int32_t)((uint32_t)esp_timer_get_time() - g_clock_last_tick_us);
+    *period_us = (float)g_clock_period_us;
+    return true;
 }
 
 void MIDI_Clock_reset(void)

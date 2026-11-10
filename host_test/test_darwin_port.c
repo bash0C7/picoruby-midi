@@ -180,6 +180,22 @@ static void test_clock_start_first_beat(void)
     usleep(60000);
     CHECK(g_first_clock_at != 0 && g_first_clock_at - g_start_at < 5000,
           "first clock right after Start (%lld us)", (long long)(g_first_clock_at - g_start_at));
+
+    int32_t tick, age;
+    float period;
+    CHECK(MIDI_Clock_position(&tick, &age, &period), "position while running");
+    int64_t since_start = midi_darwin_now_us() - g_start_at;
+    int32_t expected = (int32_t)(since_start / 41666);
+    CHECK((tick == expected || tick == expected - 1) && age >= 0 && age < 41666 && (int)period == 41666,
+          "position %d (expected %d), %d us since that tick, period %f", tick, expected, age, period);
+    MIDI_Clock_stop();
+    CHECK(!MIDI_Clock_position(&tick, &age, &period), "no position once stopped");
+    usleep(90000);
+    MIDI_Clock_continue();
+    usleep(10000);
+    int32_t resumed;
+    CHECK(MIDI_Clock_position(&resumed, &age, &period) && (resumed == tick || resumed == tick + 1),
+          "Continue goes on from the position at Stop (%d after %d)", resumed, tick);
     MIDI_Clock_stop();
     MIDI_route_remove(MIDI_Clock_bit(), bit);
     MIDI_Clock_deinit();

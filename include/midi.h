@@ -61,6 +61,13 @@ bool MIDI_Clock_is_running(void);
 uint32_t MIDI_Clock_count(void);
 uint32_t MIDI_Clock_us_to_next(void);
 
+/* Where the clock is in the song, like MIDI_Input_get_external_clock_from
+ * for the clock this process sends: the position of its last tick since
+ * Start (24 a quarter note; the ticks a Stop holds do not count after
+ * Continue), microseconds since that tick and between ticks. false while
+ * stopped or before the first tick after Start. */
+bool MIDI_Clock_position(int32_t *tick, int32_t *age_us, float *period_us);
+
 /* Set a callback for each tick (called from the timer task) */
 typedef void (*midi_clock_callback_t)(void);
 void MIDI_Clock_set_callback(midi_clock_callback_t callback);

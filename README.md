@@ -219,6 +219,9 @@ The clock (class methods; one per process):
 - `MIDI::Clock.bpm`, `MIDI::Clock.bpm = value` (20..300)
 - `MIDI::Clock.start` / `.continue` / `.stop` / `.running?` - Start (FA),
   Continue (FB), Stop (FC) along its routes. The F8s go on either way.
+- `MIDI::Clock.position` - `[tick, age_us, period_us]` like `MIDI.external_clock`,
+  for the clock this process sends: to keep its own sound on the beats it
+  sends. `nil` while stopped.
 - `MIDI::Clock.hardware?` - Whether the port runs it in C
 
 The older handle (same clock):

@@ -73,6 +73,15 @@ module MIDI
         hardware? ? _running? : false
       end
 
+      # Where the clock is in the song, to play in time with what it drives
+      # (like MIDI.external_clock for a clock that comes in):
+      # [tick, age_us, period_us] -- the position of its last F8 since Start
+      # (24 a quarter note), microseconds since that F8 and between F8s. nil
+      # while stopped, before the first F8 after Start, or without a port.
+      def position
+        hardware? ? _position : nil
+      end
+
       # --- Transport (MIDI.route(MIDI::Clock, dev)) ---
 
       # Nothing is sent to the clock

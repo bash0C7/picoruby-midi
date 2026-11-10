@@ -98,6 +98,26 @@ c_midi_clock_us_to_next(mrbc_vm *vm, mrbc_value v[], int argc)
     SET_INT_RETURN((mrbc_int_t)MIDI_Clock_us_to_next());
 }
 
+/* MIDI::Clock._position -> [tick, age_us, period_us] or nil */
+static void
+c_midi_clock_position(mrbc_vm *vm, mrbc_value v[], int argc)
+{
+    int32_t tick, age_us;
+    float period_us;
+    if (!MIDI_Clock_position(&tick, &age_us, &period_us)) {
+        SET_NIL_RETURN();
+        return;
+    }
+    mrbc_value arr = mrbc_array_new(vm, 3);
+    mrbc_value tick_val = mrbc_integer_value(tick);
+    mrbc_value age_val = mrbc_integer_value(age_us);
+    mrbc_value period_val = mrbc_float_value(vm, period_us);
+    mrbc_array_set(&arr, 0, &tick_val);
+    mrbc_array_set(&arr, 1, &age_val);
+    mrbc_array_set(&arr, 2, &period_val);
+    SET_RETURN(arr);
+}
+
 /*
  * MIDI::Input._start_task
  */
@@ -869,6 +889,7 @@ mrbc_midi_init(mrbc_vm *vm)
     mrbc_define_method(vm, class_Clock, "_running?", c_midi_clock_running);
     mrbc_define_method(vm, class_Clock, "_count", c_midi_clock_count);
     mrbc_define_method(vm, class_Clock, "_us_to_next", c_midi_clock_us_to_next);
+    mrbc_define_method(vm, class_Clock, "_position", c_midi_clock_position);
 
     /* Define Input class under MIDI */
     mrbc_class *class_Input = mrbc_define_class_under(vm, module_MIDI, "Input", mrbc_class_object);

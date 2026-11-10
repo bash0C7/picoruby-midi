@@ -108,6 +108,20 @@ mrb_midi_clock_us_to_next(mrb_state *mrb, mrb_value self)
     return mrb_fixnum_value((mrb_int)MIDI_Clock_us_to_next());
 }
 
+/* MIDI::Clock._position -> [tick, age_us, period_us] or nil */
+static mrb_value
+mrb_midi_clock_position(mrb_state *mrb, mrb_value self)
+{
+    int32_t tick, age_us;
+    float period_us;
+    if (!MIDI_Clock_position(&tick, &age_us, &period_us)) return mrb_nil_value();
+    mrb_value a = mrb_ary_new_capa(mrb, 3);
+    mrb_ary_push(mrb, a, mrb_fixnum_value(tick));
+    mrb_ary_push(mrb, a, mrb_fixnum_value(age_us));
+    mrb_ary_push(mrb, a, mrb_float_value(mrb, (mrb_float)period_us));
+    return a;
+}
+
 /* ========================================================================
  * MIDI::Input - task control + queue accessors
  * ======================================================================== */
@@ -765,6 +779,8 @@ mrb_picoruby_midi_gem_init(mrb_state *mrb)
                                mrb_midi_clock_count, MRB_ARGS_NONE());
     mrb_define_class_method_id(mrb, class_Clock, MRB_SYM(_us_to_next),
                                mrb_midi_clock_us_to_next, MRB_ARGS_NONE());
+    mrb_define_class_method_id(mrb, class_Clock, MRB_SYM(_position),
+                               mrb_midi_clock_position, MRB_ARGS_NONE());
 
     /* MIDI::Input */
     class_Input = mrb_define_class_under_id(mrb, module_MIDI, MRB_SYM(Input),
