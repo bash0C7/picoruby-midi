@@ -150,30 +150,28 @@ static void track_external_clock(midi_parser_t *p, uint64_t now_us)
      * With x = 0..n-1 and y = t - t0:
      *   slope = sum((2x - (n-1)) * y) * 6 / (n * (n^2 - 1)) */
     int n = p->clock_timestamp_count;
-    int64_t at = (int64_t)now_us;
     float period = p->clock.period_us;
     if (n >= MIDI_EXTERNAL_CLOCK_MIN_SAMPLES) {
         int oldest_idx = n < MIDI_EXTERNAL_CLOCK_SAMPLES ? 0 : p->clock_timestamp_index;
         int64_t t0 = p->clock_timestamps[oldest_idx];
         int64_t num = 0;
-        int64_t sum = 0;
         for (int x = 0; x < n; x++) {
             int64_t y = p->clock_timestamps[(oldest_idx + x) % MIDI_EXTERNAL_CLOCK_SAMPLES] - t0;
             num += (int64_t)(2 * x - (n - 1)) * y;
-            sum += y;
         }
         if (num > 0) {
             float avg = (float)(num * 6) / ((float)n * (float)(n * n - 1));
             p->external_bpm = 60000000.0f / (avg * (float)MIDI_PPQ);
             period = avg;
-            /* The fitted line at the newest clock: mean + slope * (n-1)/2 */
-            at = t0 + (sum + (int64_t)((double)avg * n * (n - 1) / 2.0)) / n;
         }
     }
 
+    /* The position's time is this clock's own stamp, not a point on the
+     * line: the line lags a tempo change by up to the window, while a
+     * stamp of when the clock was sent is off by about a millisecond */
     clock_write_begin(p);
     if (p->clock.running) p->clock.tick = p->clock_next++;
-    p->clock.at_us = at;
+    p->clock.at_us = (int64_t)now_us;
     p->clock.period_us = period;
     p->clock_seen = true;
     clock_write_end(p);

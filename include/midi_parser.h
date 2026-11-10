@@ -65,9 +65,9 @@ typedef struct {
     int32_t tick;       /* position of the last clock, in clocks (24 a
                          * quarter note); -1 until a clock comes after
                          * Start / Continue */
-    int64_t at_us;      /* when that clock came, on the now_us clock,
-                         * fitted over the recent clocks */
-    float   period_us;  /* microseconds between clocks; 0.0 until known */
+    int64_t at_us;      /* the now_us that clock was fed with */
+    float   period_us;  /* microseconds between clocks (least squares
+                         * over the recent ones); 0.0 until known */
 } midi_parser_clock_t;
 
 /* The song position of the external clock (any thread). false until a

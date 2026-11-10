@@ -496,29 +496,25 @@ TEST(test_external_clock_song_position_pointer)
     midi_parser_free(p);
 }
 
-/* Stamps off by up to +-1 ms (a 1 ms timestamp, a late read): the fitted
- * time of the newest clock stays near where it should be, the period near
- * the real one, and the period carries over a Start. */
-TEST(test_external_clock_fitted_time)
+/* Stamps off by up to +-1 ms (a 1 ms timestamp): the time of the position
+ * is the newest clock's stamp, the period stays near the real one, and the
+ * period carries over a Start. */
+TEST(test_external_clock_time_and_period)
 {
     midi_parser_t *p = midi_parser_new(MIDI_SOURCE_USB);
     midi_event_t ev;
     const double period_us = 60000000.0 / (132.0 * 24.0);
     const int jitter[] = { 0, 900, -700, 400, -1000, 600, -200, 1000 };
     midi_parser_feed_raw(p, 0xFA, 0, &ev);
-    int worst = 0;
     for (int i = 0; i < 24 * 8; i++) {
-        int64_t real = 1000000 + (int64_t)(i * period_us);
-        midi_parser_feed_raw(p, 0xF8, (uint64_t)(real + jitter[i % 8]), &ev);
+        int64_t stamp = 1000000 + (int64_t)(i * period_us) + jitter[i % 8];
+        midi_parser_feed_raw(p, 0xF8, (uint64_t)stamp, &ev);
         if (i < 48) continue;
         midi_parser_clock_t c = clock_of(p);
         EXPECT_EQ(c.tick, i);
-        int off = (int)(c.at_us - real);
-        if (off < 0) off = -off;
-        if (off > worst) worst = off;
+        EXPECT_EQ(c.at_us, stamp);
         EXPECT_TRUE(c.period_us > period_us - 20 && c.period_us < period_us + 20);
     }
-    EXPECT_TRUE(worst < 400);
 
     midi_parser_feed_raw(p, 0xFA, 9000000, &ev);
     midi_parser_feed_raw(p, 0xF8, 9000100, &ev);
@@ -585,7 +581,7 @@ int main(void)
     run_test_external_bpm_reset();
     run_test_external_clock_position();
     run_test_external_clock_song_position_pointer();
-    run_test_external_clock_fitted_time();
+    run_test_external_clock_time_and_period();
     run_test_reset_clears_running_status();
 
     printf("\n%d/%d passed\n", g_pass_count, g_test_count);
