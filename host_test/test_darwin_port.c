@@ -152,6 +152,39 @@ static void test_clock(void)
     MIDI_Clock_deinit();
 }
 
+static volatile int64_t g_start_at, g_first_clock_at;
+
+static int beat_send(void *ctx, uint8_t cable, uint8_t cin, uint8_t b1, uint8_t b2, uint8_t b3)
+{
+    (void)ctx; (void)cable; (void)cin; (void)b2; (void)b3;
+    if (b1 == 0xFA) g_start_at = midi_darwin_now_us();
+    if (b1 == 0xF8 && g_start_at && !g_first_clock_at) g_first_clock_at = midi_darwin_now_us();
+    return 0;
+}
+
+static const midi_transport_ops_t beat_ops = {
+    .send_packet = beat_send, .is_connected = sink_connected, .transport_id = MIDI_TRANSPORT_ID_NONE,
+};
+static const midi_transport_t beat_transport = { .ops = &beat_ops, .ctx = NULL };
+
+/* At 60 BPM a period is 41.7 ms; the first clock follows Start at once */
+static void test_clock_start_first_beat(void)
+{
+    midi_tmask_t bit = MIDI_transport_register(&beat_transport);
+    CHECK(bit != 0, "beat sink registered");
+    MIDI_Clock_set_bpm(60.0f);
+    CHECK(MIDI_Clock_init() == 0, "clock");
+    CHECK(MIDI_route_add(MIDI_Clock_bit(), bit, MIDI_ROUTE_ALL_CHANNELS) == 0, "route the clock");
+    usleep(60000);
+    MIDI_Clock_start();
+    usleep(60000);
+    CHECK(g_first_clock_at != 0 && g_first_clock_at - g_start_at < 5000,
+          "first clock right after Start (%lld us)", (long long)(g_first_clock_at - g_start_at));
+    MIDI_Clock_stop();
+    MIDI_route_remove(MIDI_Clock_bit(), bit);
+    MIDI_Clock_deinit();
+}
+
 static void test_note_scheduler(void)
 {
     midi_tmask_t bit = MIDI_transport_register(&sink_transport);
@@ -169,6 +202,7 @@ int main(void)
     test_packet_source_to_filter();
     test_clock_on_sent_times();
     test_clock();
+    test_clock_start_first_beat();
     test_note_scheduler();
     if (failures) {
         printf("test_darwin_port: %d failure(s)\n", failures);

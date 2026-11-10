@@ -111,11 +111,16 @@ static void clock_send(uint8_t status)
     MIDI_route_dispatch(bit, dst, CIN_SINGLE_BYTE, status, 0, 0);
 }
 
-static void clock_arm(uint64_t period_us)
+static void clock_arm_after(uint64_t first_us, uint64_t period_us)
 {
     dispatch_source_set_timer(g_clock_timer,
-                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)period_us * 1000),
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)first_us * 1000),
                               period_us * 1000, 0);
+}
+
+static void clock_arm(uint64_t period_us)
+{
+    clock_arm_after(period_us, period_us);
 }
 
 static void clock_tick(void)
@@ -218,7 +223,9 @@ void MIDI_Clock_start(void)
     on_timer_queue(^{
         uint32_t next = __atomic_exchange_n(&g_clock_next_period_us, 0, __ATOMIC_RELAXED);
         if (next) g_clock_period_us = next;
-        clock_arm(g_clock_period_us);
+        /* The clock right after Start is the first beat: receivers start
+         * on it, so it goes now rather than a period later */
+        clock_arm_after(0, g_clock_period_us);
         g_clock_last_tick_us = (uint32_t)midi_darwin_now_us();
     });
 }
